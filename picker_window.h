@@ -49,6 +49,9 @@ signals:
     void hiddenByUser();
     void searchFocusRequested();
     void panelSizeChanged(int index);
+    // Alt was held over the picker (skin-tone gesture); the app underneath saw
+    // it and needs it masked. See WindowsIntegration::maskModifierMenu().
+    void altGestureUsed();
 
 protected:
     void closeEvent(QCloseEvent *event) override;

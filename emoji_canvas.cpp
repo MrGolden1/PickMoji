@@ -249,6 +249,11 @@ void EmojiCanvas::mousePressEvent(QMouseEvent *event) {
         return;
     }
 
+    // Fires before the hit test: holding Alt reaches the app underneath whether
+    // or not the click landed on an emoji, or on one that even has skin tones.
+    if (event->modifiers().testFlag(Qt::AltModifier))
+        emit altGestureUsed();
+
     const Hit hit = hitTest(event->position().toPoint());
     const EmojiEntry *entry = entryFor(hit);
     if (!entry)

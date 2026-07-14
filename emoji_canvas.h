@@ -33,6 +33,10 @@ signals:
     // Right-click on a "Frequently Used" cell: offer removal instead of the
     // silent copy that right-click means elsewhere in the grid.
     void recentContextRequested(int repositoryIndex, const QRect &globalCellRect);
+    // The user clicked while holding Alt (the skin-tone gesture). The picker has
+    // no focus, so that Alt is landing in the app underneath and its release
+    // would open that app's menu; the controller masks it.
+    void altGestureUsed();
     void ensureVisibleRequested(const QRect &rect);
 
 protected:

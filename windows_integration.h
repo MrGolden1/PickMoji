@@ -85,6 +85,11 @@ public:
     // (passive) yet still be activated on demand for search typing.
     void setWindowNoActivate(quintptr window, bool noActivate) const;
     bool activateTarget(quintptr targetWindow) const;
+    // Neutralize a held Alt/Win so the focused app does not read its release as
+    // the lone-modifier menu gesture (Word's ribbon, Slack's menu bar). Needed
+    // wherever the user holds a modifier while the picker — which never takes
+    // focus — is on screen, so the raw key still reaches the app underneath.
+    void maskModifierMenu() const;
     void trimWorkingSet() const;
 
 private:

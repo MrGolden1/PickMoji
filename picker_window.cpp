@@ -399,6 +399,7 @@ void PickerWindow::setupUi() {
             this, &PickerWindow::showVariantMenu);
     connect(m_canvas, &EmojiCanvas::recentContextRequested,
             this, &PickerWindow::showRecentContextMenu);
+    connect(m_canvas, &EmojiCanvas::altGestureUsed, this, &PickerWindow::altGestureUsed);
     connect(m_canvas, &EmojiCanvas::ensureVisibleRequested, this, [this](const QRect &rect) {
         QScrollBar *bar = m_scrollArea->verticalScrollBar();
         const int viewportTop = bar->value();

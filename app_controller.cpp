@@ -70,6 +70,12 @@ AppController::AppController(const EmojiRepository *repository, UsageStore *usag
         scheduleMemoryTrim();
     });
     connect(&m_picker, &PickerWindow::searchFocusRequested, this, &AppController::enterPickerTyping);
+    connect(&m_picker, &PickerWindow::altGestureUsed, this, [this]() {
+        // Alt+click opens the tone palette. The picker holds no focus, so that
+        // Alt is being delivered to the app underneath — mask it now, while it
+        // is still down, or Word/Slack open their menu when the user lets go.
+        m_windows.maskModifierMenu();
+    });
     connect(&m_picker, &PickerWindow::panelSizeChanged, this, [this](int index) {
         if (index >= 0 && index < m_sizeActions.size())
             m_sizeActions.at(index)->setChecked(true);

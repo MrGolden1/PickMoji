@@ -305,6 +305,12 @@ bool GlobalHotkey::nativeEventFilter(const QByteArray &, void *message, qintptr 
 
 WindowsIntegration::WindowsIntegration(QObject *parent) : QObject(parent) {}
 
+void WindowsIntegration::maskModifierMenu() const {
+#ifdef Q_OS_WIN
+    maskModifierMenuActivation();
+#endif
+}
+
 void WindowsIntegration::trimWorkingSet() const {
 #ifdef Q_OS_WIN
     SetProcessWorkingSetSize(GetCurrentProcess(), static_cast<SIZE_T>(-1), static_cast<SIZE_T>(-1));
