@@ -110,6 +110,16 @@ void maskModifierMenuActivation() {
     SendInput(2, inputs, sizeof(INPUT));
 }
 
+// SetForegroundWindow returning is not the same as the app being ready for
+// input: it still has to move keyboard focus to its focused control (Word's
+// document, say). Keystrokes injected inside that gap are silently dropped, so
+// after a forced activation give the transition a moment to finish.
+void waitForInputSettle(HWND target) {
+    for (int attempt = 0; attempt < 10 && GetForegroundWindow() != target; ++attempt)
+        Sleep(15);
+    Sleep(40);
+}
+
 // Injected input inherits whatever modifiers the user is physically holding, and
 // the skin-tone gesture means Alt is still down at the moment of insertion. That
 // turns the paste into Ctrl+Alt+V (a different command — Word does nothing but
@@ -368,7 +378,7 @@ bool WindowsIntegration::isPointerButtonDown() const {
 #endif
 }
 
-void WindowsIntegration::setWindowNoActivate(quintptr window, bool noActivate) const {
+void WindowsIntegration::setWindowNoActivate(quintptr window, bool noActivate) {
 #ifdef Q_OS_WIN
     HWND hwnd = reinterpret_cast<HWND>(window);
     if (!hwnd)
@@ -651,8 +661,10 @@ bool WindowsIntegration::pasteWithClipboard(quintptr targetWindow, const QString
     clipboard->setText(text);
     // The target usually still holds the foreground in the non-activating model,
     // so only force a foreground switch (and its title-bar flash) when required.
-    if (!isForeground(targetWindow) && !activateTarget(targetWindow)) {
-        return false;
+    if (!isForeground(targetWindow)) {
+        if (!activateTarget(targetWindow))
+            return false;
+        waitForInputSettle(reinterpret_cast<HWND>(targetWindow));
     }
 
     INPUT inputs[4] = {};
@@ -699,7 +711,12 @@ bool WindowsIntegration::insertText(quintptr targetWindow, const QString &text, 
         return pasteWithClipboard(targetWindow, text);
     // Direct Unicode goes to the foreground window; only steal focus (causing a
     // visible blink) when the target is not already foregrounded.
-    if (!isForeground(targetWindow) && !activateTarget(targetWindow))
-        return false;
+    if (!isForeground(targetWindow)) {
+        if (!activateTarget(targetWindow))
+            return false;
+#ifdef Q_OS_WIN
+        waitForInputSettle(reinterpret_cast<HWND>(targetWindow));
+#endif
+    }
     return sendUnicode(text);
 }

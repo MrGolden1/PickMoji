@@ -2,6 +2,7 @@
 
 #include "emoji_repository.h"
 #include "usage_store.h"
+#include "windows_integration.h"
 
 #include <QAbstractButton>
 #include <QApplication>
@@ -476,6 +477,16 @@ void PickerWindow::showVariantMenu(int repositoryIndex, const QRect &globalCellR
         // the tone palette should not, on its own, hide the picker.
     });
 
+    // In passive mode the target app owns the foreground and must keep it:
+    // an activating popup would yank focus from the app, and inserting the
+    // chosen tone would then need a foreground round-trip — a blink at best,
+    // a lost paste at worst. Mouse input works fine on a non-activating
+    // window. Typing mode keeps the default so the picker stays focused.
+    if (!m_typingMode) {
+        menu->setAttribute(Qt::WA_ShowWithoutActivating, true);
+        WindowsIntegration::setWindowNoActivate(menu->winId(), true);
+    }
+
     menu->ensurePolished();
     const QSize popupSize = menu->sizeHint();
     QPoint popupPosition = globalCellRect.bottomLeft() + QPoint(0, 4);
@@ -554,6 +565,12 @@ void PickerWindow::showRecentContextMenu(int repositoryIndex, const QRect &globa
         m_variantMenuOpen = false;
         menu->deleteLater();
     });
+    // Same as the tone palette: never activate over a passive picker, so the
+    // target app keeps the foreground throughout.
+    if (!m_typingMode) {
+        menu->setAttribute(Qt::WA_ShowWithoutActivating, true);
+        WindowsIntegration::setWindowNoActivate(menu->winId(), true);
+    }
     menu->popup(globalCellRect.bottomLeft() + QPoint(2, 2));
 }
 

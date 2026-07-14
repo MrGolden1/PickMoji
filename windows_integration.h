@@ -82,8 +82,9 @@ public:
     QStringList describeScreens() const;
     bool insertText(quintptr targetWindow, const QString &text, bool compatibilityPaste);
     // Toggle WS_EX_NOACTIVATE so the picker can float without stealing focus
-    // (passive) yet still be activated on demand for search typing.
-    void setWindowNoActivate(quintptr window, bool noActivate) const;
+    // (passive) yet still be activated on demand for search typing. Static so
+    // the picker window can also apply it to its popup menus.
+    static void setWindowNoActivate(quintptr window, bool noActivate);
     bool activateTarget(quintptr targetWindow) const;
     // Neutralize a held Alt/Win so the focused app does not read its release as
     // the lone-modifier menu gesture (Word's ribbon, Slack's menu bar). Needed
