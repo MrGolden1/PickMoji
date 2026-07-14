@@ -2,12 +2,18 @@
 
 #include "emoji_keywords.h"
 
+#include <QCoreApplication>
+#include <QDir>
 #include <QFile>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QJsonValue>
 #include <QRegularExpression>
+#include <QStandardPaths>
 #include <QStringList>
+
+#include <utility>
 
 namespace {
 const QVector<int> EMPTY_INDICES;
@@ -25,6 +31,71 @@ QString groupSearchAliases(const QString &group) {
         {"Flags", "flag country پرچم کشور"},
     };
     return aliases.value(group);
+}
+
+// Keyword-file keys match with variation selectors stripped, so authors don't
+// have to know whether the catalogue spells an emoji "❤" or "❤️".
+QString keywordKey(const QString &emoji) {
+    QString result;
+    for (uint point : emoji.toUcs4()) {
+        if (point == 0xFE0F || point == 0xFE0E)
+            continue;
+        const char32_t scalar = static_cast<char32_t>(point);
+        result.append(QString::fromUcs4(&scalar, 1));
+    }
+    return result;
+}
+
+// Search keywords are extensible without a rebuild: every *.json file in
+// <exe dir>/keywords (packs shipped with the app) and <AppData>/PickMoji/keywords
+// (the user's own) is merged into the search index at startup. Format:
+//   { "language": "de", "keywords": { "😀": "lachen glücklich",
+//                                     "❤️": ["herz", "liebe"] } }
+// A bare top-level map without the "keywords" wrapper is accepted too. Values
+// only ever *add* search terms, so a bad pack can't break built-in search.
+QHash<QString, QString> loadExternalKeywords() {
+    QHash<QString, QString> merged;
+
+    QStringList directories;
+    directories << QCoreApplication::applicationDirPath() + QStringLiteral("/keywords");
+    const QString appData = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+    if (!appData.isEmpty())
+        directories << appData + QStringLiteral("/keywords");
+
+    for (const QString &directoryPath : std::as_const(directories)) {
+        const QDir directory(directoryPath);
+        const QStringList files =
+            directory.entryList({QStringLiteral("*.json")}, QDir::Files, QDir::Name);
+        for (const QString &fileName : files) {
+            QFile file(directory.filePath(fileName));
+            if (!file.open(QIODevice::ReadOnly))
+                continue;
+            const QJsonDocument document = QJsonDocument::fromJson(file.readAll());
+            if (!document.isObject())
+                continue;
+            const QJsonObject root = document.object();
+            const QJsonObject map = root.contains(QLatin1String("keywords"))
+                ? root.value(QLatin1String("keywords")).toObject() : root;
+            for (auto it = map.constBegin(); it != map.constEnd(); ++it) {
+                QString words;
+                if (it.value().isArray()) {
+                    QStringList list;
+                    for (const QJsonValue &value : it.value().toArray())
+                        list << value.toString();
+                    words = list.join(QLatin1Char(' '));
+                } else {
+                    words = it.value().toString();
+                }
+                if (words.trimmed().isEmpty())
+                    continue;
+                QString &slot = merged[keywordKey(it.key())];
+                if (!slot.isEmpty())
+                    slot += QLatin1Char(' ');
+                slot += words;
+            }
+        }
+    }
+    return merged;
 }
 
 QString skinToneFamilyKey(const QString &emoji, bool *removedTone) {
@@ -88,6 +159,7 @@ bool EmojiRepository::load() {
     m_unicodeVersion = root.value("unicodeVersion").toString();
     const QJsonArray jsonEntries = root.value("entries").toArray();
     const QHash<QString, QString> localizedKeywords = buildKeywordMap();
+    const QHash<QString, QString> externalKeywords = loadExternalKeywords();
     QHash<QString, QString> groupPool;
     QHash<QString, QString> subgroupPool;
     const auto intern = [](QHash<QString, QString> &pool, const QString &value) {
@@ -118,7 +190,8 @@ bool EmojiRepository::load() {
             const QString rawSearch = entry.emoji + QLatin1Char(' ') + entry.name + QLatin1Char(' ')
                 + entry.group + QLatin1Char(' ') + entry.subgroup + QLatin1Char(' ')
                 + groupSearchAliases(entry.group) + QLatin1Char(' ')
-                + localizedKeywords.value(entry.emoji);
+                + localizedKeywords.value(entry.emoji) + QLatin1Char(' ')
+                + externalKeywords.value(keywordKey(entry.emoji));
             entry.searchable = normalizeSearchText(rawSearch);
         }
 

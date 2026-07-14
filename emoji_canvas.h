@@ -30,6 +30,9 @@ public:
 signals:
     void emojiActivated(const QString &emoji, bool copyOnly);
     void variantsRequested(int repositoryIndex, const QRect &globalCellRect);
+    // Right-click on a "Frequently Used" cell: offer removal instead of the
+    // silent copy that right-click means elsewhere in the grid.
+    void recentContextRequested(int repositoryIndex, const QRect &globalCellRect);
     void ensureVisibleRequested(const QRect &rect);
 
 protected:

@@ -12,18 +12,23 @@ built-in emoji panel, with a look inspired by modern messaging-app pickers.
 - Virtualized emoji canvas: only visible rows are painted
 - Collapsed skin-tone families: the main grid shows one canonical emoji; `Alt+click`
   opens its compact tone palette (including mixed-tone multi-person variants)
-- English and Persian search
-- Multi-timescale frequently-used ranking (recency + short-term + long-term frequency)
+- English and Persian search, extensible per-language via drop-in keyword packs
+  (see `keywords/README.md`)
+- Multi-timescale frequently-used ranking (recency + short-term + long-term frequency);
+  each emoji is counted once per panel-open, so repeat-clicking cannot inflate its rank,
+  and right-clicking a Frequently Used emoji offers to remove it
 - Familiar category filters, keyboard navigation and a draggable frameless window
 - Resizable panel: the whole grid zooms with the window (tray → **Panel size**, or **Ctrl +/-**)
 - Non-activating window: it floats without stealing focus, so clicking an emoji inserts
   straight into the app you were using — no title-bar flicker
-- Escape/click-outside dismissal, system tray menu and optional start with Windows
+- Escape/click-outside dismissal, system tray menu and start with Windows
+  (on by default; untick it in the tray menu to opt out)
 - Single-instance IPC: launching the application again reopens the existing picker
 
 Left-click to insert an emoji while keeping the picker open for more selections.
-Right-click or Shift+click copies it instead. The picker closes on Escape, when you click
-another window, or when you press the global shortcut again.
+Right-click or Shift+click copies it instead — except in **Frequently Used**, where
+right-click opens a small menu to copy the emoji or remove it from the list. The picker
+closes on Escape, when you click another window, or when you press the global shortcut again.
 
 **Typing to search:** because the picker never steals focus from the app you are typing in,
 click the search box first — that is when it takes keyboard focus. Arrow-key navigation and

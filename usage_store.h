@@ -19,6 +19,7 @@ public:
     explicit UsageStore(QObject *parent = nullptr);
 
     void record(const QString &emoji);
+    void remove(const QString &emoji);
     double score(const QString &emoji, qint64 now = 0) const;
     bool hasUsage(const QString &emoji) const;
     void flush();

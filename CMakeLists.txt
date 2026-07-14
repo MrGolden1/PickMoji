@@ -70,6 +70,9 @@ install(TARGETS PickMoji
     RUNTIME DESTINATION bin
 )
 install(FILES THIRD_PARTY_NOTICES.md TWEMOJI-LICENSE-GRAPHICS.txt DESTINATION .)
+# Drop-in search-keyword packs: the app loads every *.json in <exe dir>/keywords,
+# so ship the folder (docs + template) next to the executable.
+install(DIRECTORY keywords DESTINATION bin)
 
 if(WIN32)
     qt_generate_deploy_app_script(

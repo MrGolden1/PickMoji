@@ -392,11 +392,13 @@ void PickerWindow::setupUi() {
     connect(m_search, &QLineEdit::textChanged, this, [this]() { m_searchTimer->start(); });
 
     connect(m_canvas, &EmojiCanvas::emojiActivated, this, [this](const QString &emoji, bool copyOnly) {
-        m_usage->record(emoji);
+        recordUsage(emoji);
         emit emojiChosen(emoji, copyOnly);
     });
     connect(m_canvas, &EmojiCanvas::variantsRequested,
             this, &PickerWindow::showVariantMenu);
+    connect(m_canvas, &EmojiCanvas::recentContextRequested,
+            this, &PickerWindow::showRecentContextMenu);
     connect(m_canvas, &EmojiCanvas::ensureVisibleRequested, this, [this](const QRect &rect) {
         QScrollBar *bar = m_scrollArea->verticalScrollBar();
         const int viewportTop = bar->value();
@@ -456,7 +458,7 @@ void PickerWindow::showVariantMenu(int repositoryIndex, const QRect &globalCellR
         connect(button, &QPushButton::clicked, this, [this, menu, variantIndex]() {
             const QString emoji = m_repository->entries().at(variantIndex).emoji;
             m_variantSelectionInProgress = true;
-            m_usage->record(emoji);
+            recordUsage(emoji);
             emit emojiChosen(emoji, false);
             menu->close();
         });
@@ -486,6 +488,72 @@ void PickerWindow::showVariantMenu(int repositoryIndex, const QRect &globalCellR
         popupPosition.setY(std::max(available.top(), popupPosition.y()));
     }
     menu->popup(popupPosition);
+}
+
+void PickerWindow::recordUsage(const QString &emoji) {
+    // One count per panel-open: sending the same emoji five times in a row is
+    // one act of choosing it, and counting every repeat would let a single
+    // spree bulldoze the frequently-used ranking.
+    if (m_sessionRecorded.contains(emoji))
+        return;
+    m_sessionRecorded.insert(emoji);
+    m_usage->record(emoji);
+}
+
+void PickerWindow::showRecentContextMenu(int repositoryIndex, const QRect &globalCellRect) {
+    if (repositoryIndex < 0 || repositoryIndex >= m_repository->entries().size())
+        return;
+    const QString emoji = m_repository->entries().at(repositoryIndex).emoji;
+
+    // Reuse the variant-menu guard: while a popup of ours is up, the
+    // controller's click-away watchdog must stand down.
+    m_variantMenuOpen = true;
+    m_autoHideArmed = false;
+
+    auto *menu = new QMenu(this);
+    menu->setObjectName("recentMenu");
+    menu->setStyleSheet(R"(
+        QMenu#recentMenu {
+            background: #1d2a36;
+            border: 1px solid #3b5062;
+            border-radius: 8px;
+            padding: 5px;
+        }
+        QMenu#recentMenu::item {
+            color: #d3dee8;
+            background: transparent;
+            padding: 7px 16px;
+            border-radius: 6px;
+            font: 12px "Segoe UI";
+        }
+        QMenu#recentMenu::item:selected { background: #2b4052; }
+    )");
+
+    QAction *copyAction = menu->addAction(QStringLiteral("Copy %1").arg(emoji));
+    connect(copyAction, &QAction::triggered, this, [this, emoji]() {
+        emit emojiChosen(emoji, true);
+    });
+
+    QAction *removeAction = menu->addAction(QStringLiteral("Remove from Frequently Used"));
+    connect(removeAction, &QAction::triggered, this, [this, repositoryIndex]() {
+        // Recents aggregate a whole skin-tone family; removing only the shown
+        // variant would let another tone pop straight back into its place.
+        const QVector<int> &family = m_repository->skinToneVariantsFor(repositoryIndex);
+        if (family.isEmpty()) {
+            m_usage->remove(m_repository->entries().at(repositoryIndex).emoji);
+        } else {
+            for (int variantIndex : family)
+                m_usage->remove(m_repository->entries().at(variantIndex).emoji);
+        }
+        if (!m_searchMode)
+            rebuildNormalSections();
+    });
+
+    connect(menu, &QMenu::aboutToHide, this, [this, menu]() {
+        m_variantMenuOpen = false;
+        menu->deleteLater();
+    });
+    menu->popup(globalCellRect.bottomLeft() + QPoint(2, 2));
 }
 
 void PickerWindow::applyStyles(double scale) {
@@ -705,6 +773,7 @@ void PickerWindow::prepareForShow() {
     m_autoHideSuppressed = false;
     m_autoHideArmed = false;
     m_typingMode = false;
+    m_sessionRecorded.clear(); // usage counting is per panel-open
     m_searchTimer->stop();
     const QSignalBlocker blocker(m_search);
     m_search->clear();

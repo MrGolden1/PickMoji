@@ -256,6 +256,13 @@ void EmojiCanvas::mousePressEvent(QMouseEvent *event) {
 
     setCurrent(hit, false);
     const int repositoryIndex = repositoryIndexFor(hit);
+    if (event->button() == Qt::RightButton
+        && m_layoutSections.at(hit.section).section.id == QLatin1String("recent")) {
+        const QRect localRect = cellRect(hit);
+        emit recentContextRequested(repositoryIndex,
+                                    QRect(mapToGlobal(localRect.topLeft()), localRect.size()));
+        return;
+    }
     if (event->button() == Qt::LeftButton
         && event->modifiers().testFlag(Qt::AltModifier)
         && m_repository->skinToneVariantsFor(repositoryIndex).size() > 1) {

@@ -90,6 +90,18 @@ AppController::AppController(const EmojiRepository *repository, UsageStore *usag
 
 void AppController::start(bool backgroundOnly) {
     QApplication::setQuitOnLastWindowClosed(false);
+
+    // A tray utility that must already be running to answer its hotkey is dead
+    // weight after a reboot, so autostart defaults on. Applied exactly once:
+    // a user who later unticks it stays unticked.
+    {
+        QSettings settings(ORGANIZATION, APPLICATION);
+        if (!settings.value("startupDefaultApplied", false).toBool()) {
+            settings.setValue("startupDefaultApplied", true);
+            if (!startsWithWindows())
+                setStartWithWindows(true);
+        }
+    }
     setupTray();
     if (followTextCursorEnabled())
         m_windows.warmUpCaretQuery();
@@ -329,8 +341,9 @@ void AppController::togglePicker() {
 QPoint AppController::pickerPosition(const QPoint &pointer, const QRect &keepClear,
                                      QStringList *trace) const {
     // The pointer decides *where* the panel wants to be; the caret decides where
-    // it may not go. We walk candidate placements around the pointer and take the
-    // first that both fits on screen and leaves the caret visible.
+    // it may not go. We walk candidate placements around the pointer, then around
+    // the caret, and take the first that stays off the line being typed — or at
+    // least off the caret when the screen leaves no room for more.
     QScreen *screen = QGuiApplication::screenAt(pointer);
     if (!screen)
         screen = QGuiApplication::primaryScreen();
@@ -343,6 +356,15 @@ QPoint AppController::pickerPosition(const QPoint &pointer, const QRect &keepCle
     QRect forbidden;
     if (keepClear.isValid() && keepClear.height() > 0)
         forbidden = keepClear.adjusted(-gap, -gap, gap, gap); // a little breathing room
+
+    // The whole line being typed, not just the caret: text grows along the line,
+    // so a panel sharing that horizontal band soon hides what is being written
+    // even though it cleared the caret itself. Prefer placements that leave the
+    // entire band free; settle for merely clearing the caret when space is tight.
+    QRect lineBand;
+    if (!forbidden.isNull())
+        lineBand = QRect(available.left(), forbidden.top(),
+                         available.width(), forbidden.height());
 
     if (trace) {
         *trace << QStringLiteral("screen=(%1,%2 %3x%4) keepClear=%5")
@@ -383,34 +405,44 @@ QPoint AppController::pickerPosition(const QPoint &pointer, const QRect &keepCle
 
     // Then hug the caret. If the pointer leaves no room, sitting directly under
     // the text cursor is a natural home — far better than fleeing to a corner.
+    // Offsets come from `forbidden` (gap already included) so that a candidate
+    // flush against it counts as clear rather than overlapping by one row.
     if (!forbidden.isNull()) {
         const int kx = keepClear.center().x() - w / 2;
         const int ky = keepClear.center().y() - h / 2;
-        candidates << Candidate{"belowCaret", {kx, keepClear.bottom() + gap}}
-                   << Candidate{"aboveCaret", {kx, keepClear.top() - gap - h}}
-                   << Candidate{"rightOfCaret", {keepClear.right() + gap, ky}}
-                   << Candidate{"leftOfCaret", {keepClear.left() - gap - w, ky}};
+        candidates << Candidate{"belowCaret", {kx, forbidden.bottom() + 1}}
+                   << Candidate{"aboveCaret", {kx, forbidden.top() - h}}
+                   << Candidate{"rightOfCaret", {forbidden.right() + 1, ky}}
+                   << Candidate{"leftOfCaret", {forbidden.left() - w, ky}};
     }
 
     QPoint best;
     QString bestLabel;
     int bestOverlap = std::numeric_limits<int>::max();
 
-    for (const Candidate &candidate : std::as_const(candidates)) {
-        const QPoint topLeft = onScreen(candidate.topLeft);
-        const int overlap = overlapArea(QRect(topLeft, size), forbidden);
-        if (overlap == 0) {
-            if (trace) {
-                *trace << QStringLiteral("place=%1(%2,%3)")
-                              .arg(QLatin1String(candidate.label))
-                              .arg(topLeft.x()).arg(topLeft.y());
+    // Pass 0 avoids the whole typed line; pass 1 relaxes to just the caret.
+    for (int pass = 0; pass < 2; ++pass) {
+        const QRect &avoid = pass == 0 ? lineBand : forbidden;
+        if (pass == 0 && lineBand.isNull())
+            continue;
+        for (const Candidate &candidate : std::as_const(candidates)) {
+            const QPoint topLeft = onScreen(candidate.topLeft);
+            const int overlap = overlapArea(QRect(topLeft, size), avoid);
+            if (overlap == 0) {
+                if (trace) {
+                    *trace << QStringLiteral("place=%1%2(%3,%4)")
+                                  .arg(QLatin1String(candidate.label),
+                                       pass == 0 && !forbidden.isNull()
+                                           ? QStringLiteral("+line") : QString())
+                                  .arg(topLeft.x()).arg(topLeft.y());
+                }
+                return topLeft;
             }
-            return topLeft;
-        }
-        if (overlap < bestOverlap) {
-            bestOverlap = overlap;
-            best = topLeft;
-            bestLabel = QLatin1String(candidate.label);
+            if (pass == 1 && overlap < bestOverlap) {
+                bestOverlap = overlap;
+                best = topLeft;
+                bestLabel = QLatin1String(candidate.label);
+            }
         }
     }
 

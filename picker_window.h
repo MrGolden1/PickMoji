@@ -4,6 +4,7 @@
 
 #include <QHash>
 #include <QPointer>
+#include <QSet>
 #include <QVector>
 #include <QWidget>
 
@@ -66,6 +67,8 @@ private:
     void updateActiveCategory();
     void setActiveCategory(const QString &sectionId);
     void showVariantMenu(int repositoryIndex, const QRect &globalCellRect);
+    void showRecentContextMenu(int repositoryIndex, const QRect &globalCellRect);
+    void recordUsage(const QString &emoji);
     void hidePicker();
     void applyChromeScale(double scale);
 
@@ -81,6 +84,7 @@ private:
     QWidget *m_emptyState = nullptr;
     QTimer *m_searchTimer = nullptr;
     QHash<QString, QAbstractButton *> m_categoryButtons;
+    QSet<QString> m_sessionRecorded;
     bool m_searchMode = false;
     bool m_autoHideArmed = false;
     bool m_autoHideSuppressed = false;

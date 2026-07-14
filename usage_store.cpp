@@ -44,6 +44,14 @@ void UsageStore::record(const QString &emoji) {
     emit usageChanged();
 }
 
+void UsageStore::remove(const QString &emoji) {
+    if (m_usage.remove(emoji) == 0)
+        return;
+    m_dirty = true;
+    m_saveTimer.start();
+    emit usageChanged();
+}
+
 double UsageStore::score(const QString &emoji, qint64 now) const {
     const auto it = m_usage.constFind(emoji);
     if (it == m_usage.cend() || it->lastUsed <= 0)
