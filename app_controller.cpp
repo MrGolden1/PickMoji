@@ -37,6 +37,9 @@ constexpr auto RUN_KEY = "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\Curre
 constexpr int POLL_VISIBLE_MS = 40;
 constexpr int POLL_HIDDEN_MS = 300;
 constexpr int ANCHOR_GAP = 14;
+// Hard ceiling on how long we will wait for a UI Automation answer. A busy or
+// hung target app must delay the picker, never freeze it.
+constexpr int CARET_QUERY_TIMEOUT_MS = 120;
 }
 
 AppController::AppController(const EmojiRepository *repository, UsageStore *usage,
@@ -157,6 +160,16 @@ void AppController::setupTray() {
     connect(m_compatibilityAction, &QAction::toggled,
             this, &AppController::setCompatibilityPasteEnabled);
 
+    m_followCursorAction = m_trayMenu->addAction("Follow text cursor");
+    m_followCursorAction->setCheckable(true);
+    m_followCursorAction->setToolTip(
+        "Open the picker at the text cursor. Uses accessibility APIs, which can make "
+        "Chromium/Electron apps build an accessibility tree. Turn off to always open "
+        "at the mouse pointer.");
+    m_followCursorAction->setChecked(followTextCursorEnabled());
+    connect(m_followCursorAction, &QAction::toggled,
+            this, &AppController::setFollowTextCursorEnabled);
+
     m_startupAction = m_trayMenu->addAction("Start with Windows");
     m_startupAction->setCheckable(true);
     m_startupAction->setChecked(startsWithWindows());
@@ -252,16 +265,9 @@ void AppController::showPicker() {
     // "still using the target app" from "switched to another window".
     m_openForeground = foreground;
 
-    // Anchor to the text caret when the app exposes one, otherwise to the mouse
-    // pointer. Both track where the user actually is — including which monitor —
-    // and boundedPickerPosition() then guarantees we never sit on the anchor.
-    QPoint anchor;
-    if (!m_windows.caretPosition(m_activeTarget, anchor))
-        anchor = QCursor::pos();
-
     m_windows.setWindowNoActivate(pickerHandle, true);
     m_picker.prepareForShow();
-    m_picker.move(boundedPickerPosition(anchor));
+    m_picker.move(boundedPickerPosition(anchorForPicker()));
     m_picker.show();
     m_picker.raise();
     m_targetMonitor.setInterval(POLL_VISIBLE_MS);
@@ -312,6 +318,42 @@ QPoint AppController::boundedPickerPosition(const QPoint &anchor) const {
                                        : anchor.x() - ANCHOR_GAP - pickerSize.width();
     return QPoint(std::clamp(sideX, available.left(),
                              available.right() - pickerSize.width() + 1), y);
+}
+
+bool AppController::isPlausibleAnchor(const QRect &rect) const {
+    if (rect.height() <= 0)
+        return false;
+    QScreen *screen = QGuiApplication::screenAt(rect.topLeft());
+    if (!screen)
+        screen = QGuiApplication::primaryScreen();
+    if (!screen)
+        return false;
+    const QRect available = screen->availableGeometry();
+    if (!available.intersects(rect))
+        return false; // stale or off-screen
+    // Focus can land on a whole document/canvas rather than a text line. Such a
+    // rect is useless as an anchor, so reject it and let the next source win.
+    return rect.height() <= available.height() / 2;
+}
+
+QPoint AppController::anchorForPicker() const {
+    if (followTextCursorEnabled()) {
+        // 1) Classic Win32 caret: free and side-effect-free, so try it first.
+        QPoint caret;
+        if (m_windows.caretPosition(m_activeTarget, caret))
+            return caret;
+
+        // 2) UI Automation: the only way to find the caret in Chromium/Electron/
+        //    UWP apps. Deliberately second, because querying it makes those apps
+        //    build an accessibility tree (a real cost in *their* process).
+        QRect textRect;
+        if (m_windows.focusedTextRect(textRect, CARET_QUERY_TIMEOUT_MS)
+            && isPlausibleAnchor(textRect)) {
+            return QPoint(textRect.left(), textRect.bottom());
+        }
+    }
+    // 3) The pointer: always available, and on the monitor the user is using.
+    return QCursor::pos();
 }
 
 QPoint AppController::clampToScreen(const QPoint &topLeft) const {
@@ -429,6 +471,16 @@ bool AppController::compatibilityPasteEnabled() const {
 void AppController::setCompatibilityPasteEnabled(bool enabled) {
     QSettings settings(ORGANIZATION, APPLICATION);
     settings.setValue("compatibilityPaste", enabled);
+}
+
+bool AppController::followTextCursorEnabled() const {
+    QSettings settings(ORGANIZATION, APPLICATION);
+    return settings.value("followTextCursor", true).toBool();
+}
+
+void AppController::setFollowTextCursorEnabled(bool enabled) {
+    QSettings settings(ORGANIZATION, APPLICATION);
+    settings.setValue("followTextCursor", enabled);
 }
 
 bool AppController::startsWithWindows() const {

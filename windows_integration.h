@@ -5,6 +5,7 @@
 #include <QKeySequence>
 #include <QObject>
 #include <QPoint>
+#include <QRect>
 #include <QSize>
 #include <QString>
 
@@ -56,9 +57,19 @@ public:
     // click-outside dismissal on; sample the pointer buttons instead.
     bool isPointerButtonDown() const;
     QPoint caretOrCursorPosition(quintptr targetWindow) const;
-    // Returns true only when the target exposes a real text caret; lets the
-    // caller choose a smarter fallback than the mouse position.
+    // Returns true only when the target exposes a real (classic Win32) text
+    // caret; lets the caller choose a smarter fallback than the mouse position.
     bool caretPosition(quintptr targetWindow, QPoint &position) const;
+
+    // Locates the caret via UI Automation, which works in Chromium/Electron/UWP
+    // apps that have no Win32 caret. Falls back to the focused control's own box
+    // when the app exposes no text pattern. Runs off-thread with a deadline: a
+    // busy or hung target must never freeze the picker.
+    bool focusedTextRect(QRect &logicalRect, int timeoutMs) const;
+
+    // Win32/UIA report physical pixels while Qt works in logical ones; they only
+    // coincide at 100% scaling. Everything handed back to Qt goes through this.
+    QPoint nativeToLogical(const QPoint &nativePoint) const;
     bool insertText(quintptr targetWindow, const QString &text, bool compatibilityPaste);
     // Toggle WS_EX_NOACTIVATE so the picker can float without stealing focus
     // (passive) yet still be activated on demand for search typing.

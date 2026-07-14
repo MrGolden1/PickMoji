@@ -39,9 +39,13 @@ private:
     void scheduleMemoryTrim();
     QPoint boundedPickerPosition(const QPoint &anchor) const;
     QPoint clampToScreen(const QPoint &topLeft) const;
+    QPoint anchorForPicker() const;
+    bool isPlausibleAnchor(const QRect &rect) const;
     QIcon createAppIcon() const;
     bool compatibilityPasteEnabled() const;
     void setCompatibilityPasteEnabled(bool enabled);
+    bool followTextCursorEnabled() const;
+    void setFollowTextCursorEnabled(bool enabled);
     bool startsWithWindows() const;
     void setStartWithWindows(bool enabled);
 
@@ -55,6 +59,7 @@ private:
     QAction *m_showAction = nullptr;
     QAction *m_shortcutAction = nullptr;
     QAction *m_compatibilityAction = nullptr;
+    QAction *m_followCursorAction = nullptr;
     QAction *m_startupAction = nullptr;
     QActionGroup *m_sizeGroup = nullptr;
     QList<QAction *> m_sizeActions;

@@ -10,6 +10,11 @@ if(MSVC)
     add_compile_options(/utf-8)
 endif()
 
+if(WIN32)
+    # windows.h defines min/max as macros, which breaks std::max / std::min.
+    add_compile_definitions(NOMINMAX)
+endif()
+
 find_package(Qt6 REQUIRED COMPONENTS Widgets)
 
 add_executable(PickMoji WIN32
@@ -44,7 +49,9 @@ qt_add_resources(PickMoji "flag_assets"
 )
 
 if(WIN32)
-    target_link_libraries(PickMoji PRIVATE user32)
+    # ole32/oleaut32: UI Automation is COM (CoCreateInstance + SAFEARRAY), used to
+    # locate the caret in apps that have no classic Win32 caret.
+    target_link_libraries(PickMoji PRIVATE user32 ole32 oleaut32)
 
     # Embed the multi-resolution application icon so Explorer, the taskbar and
     # the installer show it instead of the generic Qt executable icon.
@@ -96,7 +103,7 @@ if(BUILD_TESTING)
         FILES ${FLAG_ASSETS}
     )
     if(WIN32)
-        target_link_libraries(PickMojiSmokeTest PRIVATE user32)
+        target_link_libraries(PickMojiSmokeTest PRIVATE user32 ole32 oleaut32)
     endif()
     if(MSVC)
         target_compile_options(PickMojiSmokeTest PRIVATE /W4 /permissive-)

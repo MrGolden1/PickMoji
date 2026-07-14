@@ -8,12 +8,20 @@
 #include <QHash>
 #include <QKeyCombination>
 #include <QMimeData>
+#include <QScreen>
 #include <QTimer>
 
 #ifdef Q_OS_WIN
 #include <windows.h>
+#include <uiautomation.h>
 #endif
 
+#include <algorithm>
+#include <chrono>
+#include <condition_variable>
+#include <memory>
+#include <mutex>
+#include <thread>
 #include <vector>
 
 namespace {
@@ -82,6 +90,93 @@ bool toNativeHotkey(const QKeySequence &sequence, NativeHotkey &native, QString 
         }
     }
     return true;
+}
+
+// Shared state for an off-thread UI Automation query. Held by shared_ptr so the
+// detached worker can safely finish writing even after we have given up waiting.
+struct FocusRectQuery {
+    std::mutex mutex;
+    std::condition_variable done;
+    bool completed = false;
+    bool found = false;
+    QRect rect; // native/physical screen pixels
+};
+
+void runFocusRectQuery(std::shared_ptr<FocusRectQuery> state) {
+    QRect result;
+    bool found = false;
+
+    if (SUCCEEDED(CoInitializeEx(nullptr, COINIT_MULTITHREADED))) {
+        IUIAutomation *automation = nullptr;
+        if (SUCCEEDED(CoCreateInstance(CLSID_CUIAutomation, nullptr, CLSCTX_INPROC_SERVER,
+                                       IID_PPV_ARGS(&automation)))
+            && automation) {
+            // The picker never takes focus, so the globally focused element is
+            // exactly the control the user is typing in.
+            IUIAutomationElement *focused = nullptr;
+            if (SUCCEEDED(automation->GetFocusedElement(&focused)) && focused) {
+                IUIAutomationTextPattern *textPattern = nullptr;
+                if (SUCCEEDED(focused->GetCurrentPatternAs(UIA_TextPatternId,
+                                                           IID_PPV_ARGS(&textPattern)))
+                    && textPattern) {
+                    IUIAutomationTextRangeArray *ranges = nullptr;
+                    if (SUCCEEDED(textPattern->GetSelection(&ranges)) && ranges) {
+                        int count = 0;
+                        ranges->get_Length(&count);
+                        IUIAutomationTextRange *range = nullptr;
+                        if (count > 0 && SUCCEEDED(ranges->GetElement(0, &range)) && range) {
+                            SAFEARRAY *bounds = nullptr;
+                            if (SUCCEEDED(range->GetBoundingRectangles(&bounds)) && bounds) {
+                                LONG lower = 0;
+                                LONG upper = -1;
+                                double *values = nullptr;
+                                // Groups of four doubles: left, top, width, height.
+                                if (SUCCEEDED(SafeArrayGetLBound(bounds, 1, &lower))
+                                    && SUCCEEDED(SafeArrayGetUBound(bounds, 1, &upper))
+                                    && upper - lower + 1 >= 4
+                                    && SUCCEEDED(SafeArrayAccessData(
+                                           bounds, reinterpret_cast<void **>(&values)))) {
+                                    // A collapsed caret is zero-width; keep it visible.
+                                    result = QRect(qRound(values[0]), qRound(values[1]),
+                                                   std::max(1, qRound(values[2])),
+                                                   qRound(values[3]));
+                                    found = result.height() > 0;
+                                    SafeArrayUnaccessData(bounds);
+                                }
+                                SafeArrayDestroy(bounds);
+                            }
+                            range->Release();
+                        }
+                        if (ranges)
+                            ranges->Release();
+                    }
+                    textPattern->Release();
+                }
+
+                // No text pattern (or an empty selection): fall back to the
+                // focused control's own box, which is still a good anchor.
+                if (!found) {
+                    RECT box = {};
+                    if (SUCCEEDED(focused->get_CurrentBoundingRectangle(&box))) {
+                        result = QRect(QPoint(box.left, box.top),
+                                       QPoint(box.right - 1, box.bottom - 1));
+                        found = result.width() > 0 && result.height() > 0;
+                    }
+                }
+                focused->Release();
+            }
+            automation->Release();
+        }
+        CoUninitialize();
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(state->mutex);
+        state->rect = result;
+        state->found = found;
+        state->completed = true;
+    }
+    state->done.notify_all();
 }
 #endif
 } // namespace
@@ -287,10 +382,11 @@ bool WindowsIntegration::caretPosition(quintptr targetWindow, QPoint &position) 
     const DWORD threadId = GetWindowThreadProcessId(target, nullptr);
     GUITHREADINFO information = {};
     information.cbSize = sizeof(information);
-    if (threadId && GetGUIThreadInfo(threadId, &information) && information.hwndCaret) {
+    if (threadId && GetGUIThreadInfo(threadId, &information) && information.hwndCaret
+        && information.rcCaret.bottom > information.rcCaret.top) { // reject hidden 0-height carets
         POINT point = {information.rcCaret.left, information.rcCaret.bottom};
         if (ClientToScreen(information.hwndCaret, &point)) {
-            position = QPoint(point.x, point.y);
+            position = nativeToLogical(QPoint(point.x, point.y));
             return true;
         }
     }
@@ -298,6 +394,63 @@ bool WindowsIntegration::caretPosition(quintptr targetWindow, QPoint &position) 
 #else
     Q_UNUSED(targetWindow);
     Q_UNUSED(position);
+    return false;
+#endif
+}
+
+QPoint WindowsIntegration::nativeToLogical(const QPoint &nativePoint) const {
+#ifdef Q_OS_WIN
+    const POINT point = {nativePoint.x(), nativePoint.y()};
+    const HMONITOR monitor = MonitorFromPoint(point, MONITOR_DEFAULTTONEAREST);
+    MONITORINFOEXW information = {};
+    information.cbSize = sizeof(information);
+    if (monitor && GetMonitorInfoW(monitor, &information)) {
+        // QScreen::name() on Windows is the GDI device name (\\.\DISPLAY1),
+        // which is exactly what MONITORINFOEX reports — a reliable pairing.
+        const QString deviceName = QString::fromWCharArray(information.szDevice);
+        const QList<QScreen *> screens = QGuiApplication::screens();
+        for (QScreen *screen : screens) {
+            if (screen->name() != deviceName)
+                continue;
+            const qreal ratio = screen->devicePixelRatio();
+            if (ratio <= 0.0)
+                break;
+            const QPoint offset(qRound((nativePoint.x() - information.rcMonitor.left) / ratio),
+                                qRound((nativePoint.y() - information.rcMonitor.top) / ratio));
+            return screen->geometry().topLeft() + offset;
+        }
+    }
+#endif
+    return nativePoint;
+}
+
+bool WindowsIntegration::focusedTextRect(QRect &logicalRect, int timeoutMs) const {
+#ifdef Q_OS_WIN
+    auto state = std::make_shared<FocusRectQuery>();
+    // Detached on purpose: UI Automation is cross-process COM and can block on a
+    // busy target. We refuse to wait longer than the deadline; the worker keeps
+    // the shared state alive and simply finishes into a result nobody reads.
+    std::thread(runFocusRectQuery, state).detach();
+
+    QRect native;
+    {
+        std::unique_lock<std::mutex> lock(state->mutex);
+        if (!state->done.wait_for(lock, std::chrono::milliseconds(timeoutMs),
+                                  [&state] { return state->completed; })) {
+            return false;
+        }
+        if (!state->found)
+            return false;
+        native = state->rect;
+    }
+
+    const QPoint topLeft = nativeToLogical(native.topLeft());
+    const QPoint bottomRight = nativeToLogical(native.bottomRight());
+    logicalRect = QRect(topLeft, bottomRight);
+    return logicalRect.height() > 0;
+#else
+    Q_UNUSED(logicalRect);
+    Q_UNUSED(timeoutMs);
     return false;
 #endif
 }
