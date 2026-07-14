@@ -1,0 +1,4 @@
+// Generated into the build tree by CMake (configure_file). The absolute,
+// forward-slash path lets rc.exe find the icon regardless of its working
+// directory. Resource id 1 makes this the executable's Explorer icon.
+1 ICON "@PICKMOJI_ICON@"

@@ -1,0 +1,36 @@
+# Build trees and packaging output
+# (the MSIX sources live in packaging/msix/ and ARE tracked; build-msix/ is output)
+build/
+build-*/
+out/
+
+# Install / deploy output
+dist/
+
+# MSIX packaging output and signing material — never commit certificates
+*.msix
+*.appx
+*.cer
+*.pfx
+*.p12
+*.snk
+
+# Python virtual environment / caches
+.venv/
+__pycache__/
+*.pyc
+
+# Logs
+*.log
+
+# IDE / editor
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+
+# OS noise
+Thumbs.db
+desktop.ini
+.DS_Store
