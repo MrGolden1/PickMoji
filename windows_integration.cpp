@@ -375,7 +375,7 @@ QPoint WindowsIntegration::caretOrCursorPosition(quintptr targetWindow) const {
     return QCursor::pos();
 }
 
-bool WindowsIntegration::caretPosition(quintptr targetWindow, QPoint &position) const {
+bool WindowsIntegration::caretRect(quintptr targetWindow, QRect &logicalRect) const {
 #ifdef Q_OS_WIN
     const HWND target = reinterpret_cast<HWND>(targetWindow);
     if (!target)
@@ -385,16 +385,22 @@ bool WindowsIntegration::caretPosition(quintptr targetWindow, QPoint &position) 
     information.cbSize = sizeof(information);
     if (threadId && GetGUIThreadInfo(threadId, &information) && information.hwndCaret
         && information.rcCaret.bottom > information.rcCaret.top) { // reject hidden 0-height carets
-        POINT point = {information.rcCaret.left, information.rcCaret.bottom};
-        if (ClientToScreen(information.hwndCaret, &point)) {
-            position = nativeToLogical(QPoint(point.x, point.y));
-            return true;
+        POINT topLeft = {information.rcCaret.left, information.rcCaret.top};
+        POINT bottomRight = {information.rcCaret.right, information.rcCaret.bottom};
+        if (ClientToScreen(information.hwndCaret, &topLeft)
+            && ClientToScreen(information.hwndCaret, &bottomRight)) {
+            logicalRect = QRect(nativeToLogical(QPoint(topLeft.x, topLeft.y)),
+                                nativeToLogical(QPoint(bottomRight.x, bottomRight.y)));
+            // A caret is zero-width; give it substance so it can be avoided.
+            if (logicalRect.width() < 2)
+                logicalRect.setWidth(2);
+            return logicalRect.height() > 0;
         }
     }
     return false;
 #else
     Q_UNUSED(targetWindow);
-    Q_UNUSED(position);
+    Q_UNUSED(logicalRect);
     return false;
 #endif
 }

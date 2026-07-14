@@ -29,6 +29,8 @@
 #include <QVBoxLayout>
 
 #include <algorithm>
+#include <limits>
+#include <utility>
 
 namespace {
 constexpr auto ORGANIZATION = "PickMoji";
@@ -45,6 +47,11 @@ constexpr int ANCHOR_GAP = 14;
 // app building its accessibility tree; a warm query answers in ~10ms, and an app
 // with no caret returns NotFound promptly rather than timing out.
 constexpr int CARET_QUERY_TIMEOUT_MS = 300;
+
+int overlapArea(const QRect &a, const QRect &b) {
+    const QRect intersection = a.intersected(b);
+    return intersection.isEmpty() ? 0 : intersection.width() * intersection.height();
+}
 }
 
 AppController::AppController(const EmojiRepository *repository, UsageStore *usage,
@@ -272,9 +279,24 @@ void AppController::showPicker() {
     // "still using the target app" from "switched to another window".
     m_openForeground = foreground;
 
+    // The pointer decides where the panel goes; the caret is a region it must
+    // not cover.
+    QStringList trace;
+    const QRect keepClear = keepClearRect(&trace);
+    const QPoint pointer = QCursor::pos();
+    const QPoint topLeft = pickerPosition(pointer, keepClear, &trace);
+    if (m_debugAnchor) {
+        trace << QStringLiteral("pointer=(%1,%2) panel=%3x%4")
+                      .arg(pointer.x()).arg(pointer.y())
+                      .arg(m_picker.width()).arg(m_picker.height());
+        QFile log(QDir::tempPath() + QStringLiteral("/pickmoji-anchor.log"));
+        if (log.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text))
+            QTextStream(&log) << trace.join(QStringLiteral(" | ")) << '\n';
+    }
+
     m_windows.setWindowNoActivate(pickerHandle, true);
     m_picker.prepareForShow();
-    m_picker.move(boundedPickerPosition(anchorForPicker()));
+    m_picker.move(topLeft);
     m_picker.show();
     m_picker.raise();
     m_targetMonitor.setInterval(POLL_VISIBLE_MS);
@@ -294,45 +316,90 @@ void AppController::togglePicker() {
         showPicker();
 }
 
-QPoint AppController::boundedPickerPosition(const QPoint &anchor) const {
-    // Place the panel next to the anchor (caret or pointer) without ever
-    // covering it: below if it fits, else above, else beside it. Everything is
-    // resolved on the anchor's own screen, so the picker follows the monitor the
-    // user is actually working on.
-    QScreen *screen = QGuiApplication::screenAt(anchor);
+QPoint AppController::pickerPosition(const QPoint &pointer, const QRect &keepClear,
+                                     QStringList *trace) const {
+    // The pointer decides *where* the panel wants to be; the caret decides where
+    // it may not go. We walk candidate placements around the pointer and take the
+    // first that both fits on screen and leaves the caret visible.
+    QScreen *screen = QGuiApplication::screenAt(pointer);
     if (!screen)
         screen = QGuiApplication::primaryScreen();
     const QRect available = screen ? screen->availableGeometry() : QRect(0, 0, 1920, 1080);
-    const QSize pickerSize = m_picker.size();
+    const QSize size = m_picker.size();
+    const int w = size.width();
+    const int h = size.height();
+    const int gap = ANCHOR_GAP;
 
-    const int x = std::clamp(anchor.x() - pickerSize.width() / 2,
-                             available.left(), available.right() - pickerSize.width() + 1);
+    QRect forbidden;
+    if (keepClear.isValid() && keepClear.height() > 0)
+        forbidden = keepClear.adjusted(-gap, -gap, gap, gap); // a little breathing room
 
-    const int below = anchor.y() + ANCHOR_GAP;
-    if (below + pickerSize.height() - 1 <= available.bottom())
-        return QPoint(x, below);
+    const int cx = pointer.x() - w / 2;
+    const int cy = pointer.y() - h / 2;
 
-    const int above = anchor.y() - ANCHOR_GAP - pickerSize.height();
-    if (above >= available.top())
-        return QPoint(x, above);
+    QList<QPoint> candidates = {
+        {cx, pointer.y() + gap},                    // below
+        {pointer.x() + gap, pointer.y() + gap},     // below-right
+        {cx, pointer.y() - gap - h},                // above
+        {pointer.x() + gap, cy},                    // right
+        {pointer.x() - gap - w, cy},                // left
+        {pointer.x() - gap - w, pointer.y() + gap}, // below-left
+        {pointer.x() + gap, pointer.y() - gap - h}, // above-right
+        {pointer.x() - gap - w, pointer.y() - gap - h}, // above-left
+    };
+    // Last resorts: retreat to a screen edge, still on the pointer's monitor.
+    const int edgeY = std::clamp(cy, available.top(), available.bottom() - h + 1);
+    const int edgeX = std::clamp(cx, available.left(), available.right() - w + 1);
+    candidates << QPoint(available.right() - w + 1, edgeY)
+               << QPoint(available.left(), edgeY)
+               << QPoint(edgeX, available.top())
+               << QPoint(edgeX, available.bottom() - h + 1);
 
-    // Too tall to fit above or below. Sitting *adjacent* to the anchor is wrong:
-    // the panel still lands on the line being typed, just to one side of the
-    // caret. Retreat to whichever screen edge has more room instead, so the text
-    // column the user is working in stays fully visible.
-    const int y = std::clamp(anchor.y() - pickerSize.height() / 2,
-                             available.top(), available.bottom() - pickerSize.height() + 1);
-    const int roomLeft = anchor.x() - available.left();
-    const int roomRight = available.right() - anchor.x();
-    const int sideX = (roomRight >= roomLeft) ? available.right() - pickerSize.width() + 1
-                                              : available.left();
-    return QPoint(sideX, y);
+    QPoint best;
+    int bestOverlap = std::numeric_limits<int>::max();
+    int bestDistance = std::numeric_limits<int>::max();
+    bool haveBest = false;
+
+    for (const QPoint &candidate : std::as_const(candidates)) {
+        const QRect rect(candidate, size);
+        if (!available.contains(rect))
+            continue; // must fit without clamping, or clamping could re-cover the caret
+        const int overlap = overlapArea(rect, forbidden);
+        if (overlap == 0) {
+            if (trace) {
+                *trace << QStringLiteral("place=clear(%1,%2)")
+                              .arg(candidate.x()).arg(candidate.y());
+            }
+            return candidate;
+        }
+        // Nothing clean yet: remember the least-bad option.
+        const int distance = (rect.center() - pointer).manhattanLength();
+        if (overlap < bestOverlap || (overlap == bestOverlap && distance < bestDistance)) {
+            bestOverlap = overlap;
+            bestDistance = distance;
+            best = candidate;
+            haveBest = true;
+        }
+    }
+
+    if (haveBest) {
+        if (trace) {
+            *trace << QStringLiteral("place=leastOverlap(%1,%2) overlap=%3px2")
+                          .arg(best.x()).arg(best.y()).arg(bestOverlap);
+        }
+        return best;
+    }
+
+    // The panel is larger than the work area itself; nothing can fit cleanly.
+    if (trace)
+        *trace << QStringLiteral("place=clamped");
+    return clampToScreen(QPoint(cx, pointer.y() + gap));
 }
 
-bool AppController::isPlausibleAnchor(const QRect &rect) const {
+bool AppController::isPlausibleKeepClear(const QRect &rect) const {
     if (rect.height() <= 0)
         return false;
-    QScreen *screen = QGuiApplication::screenAt(rect.topLeft());
+    QScreen *screen = QGuiApplication::screenAt(rect.center());
     if (!screen)
         screen = QGuiApplication::primaryScreen();
     if (!screen)
@@ -340,74 +407,58 @@ bool AppController::isPlausibleAnchor(const QRect &rect) const {
     const QRect available = screen->availableGeometry();
     if (!available.intersects(rect))
         return false; // stale or off-screen
-    // Focus can land on a whole document/canvas rather than a text line. Such a
-    // rect is useless as an anchor, so reject it and let the next source win.
+    // Focus can land on a whole document/canvas rather than a text line. Treating
+    // that as keep-clear would banish the panel for no reason, so ignore it.
     return rect.height() <= available.height() / 2;
 }
 
-QPoint AppController::anchorForPicker() const {
-    QStringList trace;
-    QPoint chosen;
-    bool haveChosen = false;
-
-    if (followTextCursorEnabled()) {
-        // 1) Classic Win32 caret: free and side-effect-free, so try it first.
-        QPoint caret;
-        // Some apps leave a stale/hidden caret behind, so require it to actually
-        // land on a screen before trusting it.
-        if (m_windows.caretPosition(m_activeTarget, caret)
-            && QGuiApplication::screenAt(caret) != nullptr) {
-            trace << QStringLiteral("win32Caret=HIT(%1,%2)").arg(caret.x()).arg(caret.y());
-            chosen = caret;
-            haveChosen = true;
-        } else {
-            trace << QStringLiteral("win32Caret=MISS");
-        }
-
-        // 2) UI Automation: the only way to find the caret in Chromium/Electron/
-        //    UWP apps. Deliberately second, because querying it makes those apps
-        //    build an accessibility tree (a real cost in *their* process).
-        if (!haveChosen) {
-            QRect textRect;
-            int elapsed = 0;
-            const WindowsIntegration::CaretQuery status =
-                m_windows.focusedTextRect(textRect, CARET_QUERY_TIMEOUT_MS, &elapsed);
-            const char *statusText = "?";
-            switch (status) {
-            case WindowsIntegration::CaretQuery::Found: statusText = "FOUND"; break;
-            case WindowsIntegration::CaretQuery::NotFound: statusText = "NOTFOUND"; break;
-            case WindowsIntegration::CaretQuery::TimedOut: statusText = "TIMEOUT"; break;
-            case WindowsIntegration::CaretQuery::Unsupported: statusText = "UNSUPPORTED"; break;
-            }
-            trace << QStringLiteral("uia=%1 in %2ms rect=(%3,%4 %5x%6) plausible=%7")
-                         .arg(QLatin1String(statusText)).arg(elapsed)
-                         .arg(textRect.x()).arg(textRect.y())
-                         .arg(textRect.width()).arg(textRect.height())
-                         .arg(isPlausibleAnchor(textRect) ? "yes" : "no");
-            if (status == WindowsIntegration::CaretQuery::Found && isPlausibleAnchor(textRect)) {
-                chosen = QPoint(textRect.left(), textRect.bottom());
-                haveChosen = true;
-            }
-        }
-    } else {
-        trace << QStringLiteral("followTextCursor=off");
+QRect AppController::keepClearRect(QStringList *trace) const {
+    if (!followTextCursorEnabled()) {
+        if (trace)
+            *trace << QStringLiteral("followTextCursor=off");
+        return {};
     }
 
-    // 3) The pointer: always available, and on the monitor the user is using.
-    if (!haveChosen)
-        chosen = QCursor::pos();
-
-    if (m_debugAnchor) {
-        trace << QStringLiteral("source=%1 anchor=(%2,%3) panelSize=%4x%5")
-                     .arg(haveChosen ? "caret" : "mouse")
-                     .arg(chosen.x()).arg(chosen.y())
-                     .arg(m_picker.width()).arg(m_picker.height());
-        QFile log(QDir::tempPath() + QStringLiteral("/pickmoji-anchor.log"));
-        if (log.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text)) {
-            QTextStream(&log) << trace.join(QStringLiteral(" | ")) << '\n';
+    // 1) Classic Win32 caret: free and side-effect-free, so try it first. Some
+    //    apps leave a stale caret behind, so require it to land on a screen.
+    QRect caret;
+    if (m_windows.caretRect(m_activeTarget, caret)
+        && QGuiApplication::screenAt(caret.center()) != nullptr
+        && isPlausibleKeepClear(caret)) {
+        if (trace) {
+            *trace << QStringLiteral("win32Caret=HIT(%1,%2 %3x%4)")
+                          .arg(caret.x()).arg(caret.y())
+                          .arg(caret.width()).arg(caret.height());
         }
+        return caret;
     }
-    return chosen;
+    if (trace)
+        *trace << QStringLiteral("win32Caret=MISS");
+
+    // 2) UI Automation: the only way to find the caret in Chromium/Electron/UWP
+    //    apps. Second, because querying it makes those apps build an
+    //    accessibility tree (a real cost in *their* process).
+    QRect textRect;
+    int elapsed = 0;
+    const WindowsIntegration::CaretQuery status =
+        m_windows.focusedTextRect(textRect, CARET_QUERY_TIMEOUT_MS, &elapsed);
+    const char *statusText = "?";
+    switch (status) {
+    case WindowsIntegration::CaretQuery::Found: statusText = "FOUND"; break;
+    case WindowsIntegration::CaretQuery::NotFound: statusText = "NOTFOUND"; break;
+    case WindowsIntegration::CaretQuery::TimedOut: statusText = "TIMEOUT"; break;
+    case WindowsIntegration::CaretQuery::Unsupported: statusText = "UNSUPPORTED"; break;
+    }
+    const bool usable = status == WindowsIntegration::CaretQuery::Found
+        && isPlausibleKeepClear(textRect);
+    if (trace) {
+        *trace << QStringLiteral("uia=%1 in %2ms rect=(%3,%4 %5x%6) usable=%7")
+                      .arg(QLatin1String(statusText)).arg(elapsed)
+                      .arg(textRect.x()).arg(textRect.y())
+                      .arg(textRect.width()).arg(textRect.height())
+                      .arg(usable ? "yes" : "no");
+    }
+    return usable ? textRect : QRect();
 }
 
 QPoint AppController::clampToScreen(const QPoint &topLeft) const {

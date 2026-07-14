@@ -57,9 +57,9 @@ public:
     // click-outside dismissal on; sample the pointer buttons instead.
     bool isPointerButtonDown() const;
     QPoint caretOrCursorPosition(quintptr targetWindow) const;
-    // Returns true only when the target exposes a real (classic Win32) text
-    // caret; lets the caller choose a smarter fallback than the mouse position.
-    bool caretPosition(quintptr targetWindow, QPoint &position) const;
+    // The classic Win32 caret, as a rect so the caller can treat it as a region
+    // to keep clear rather than just a point to anchor on.
+    bool caretRect(quintptr targetWindow, QRect &logicalRect) const;
 
     // Locates the caret via UI Automation, which works in Chromium/Electron/UWP
     // apps that have no Win32 caret. Falls back to the focused control's own box

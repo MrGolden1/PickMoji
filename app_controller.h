@@ -39,10 +39,13 @@ private:
     void onMonitorTick();
     void enterPickerTyping();
     void scheduleMemoryTrim();
-    QPoint boundedPickerPosition(const QPoint &anchor) const;
     QPoint clampToScreen(const QPoint &topLeft) const;
-    QPoint anchorForPicker() const;
-    bool isPlausibleAnchor(const QRect &rect) const;
+    // The text caret's region: the panel is placed around the mouse, but must
+    // not land on top of this.
+    QRect keepClearRect(QStringList *trace) const;
+    QPoint pickerPosition(const QPoint &pointer, const QRect &keepClear,
+                          QStringList *trace) const;
+    bool isPlausibleKeepClear(const QRect &rect) const;
     QIcon createAppIcon() const;
     bool compatibilityPasteEnabled() const;
     void setCompatibilityPasteEnabled(bool enabled);
