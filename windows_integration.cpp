@@ -110,6 +110,31 @@ void maskModifierMenuActivation() {
     SendInput(2, inputs, sizeof(INPUT));
 }
 
+// Injected input inherits whatever modifiers the user is physically holding, and
+// the skin-tone gesture means Alt is still down at the moment of insertion. That
+// turns the paste into Ctrl+Alt+V (a different command — Word does nothing but
+// flash) and direct Unicode into WM_SYSCHAR (a menu accelerator, not text). So
+// release every held modifier first. The user's own key-up afterwards is a
+// harmless duplicate.
+void releaseHeldModifiers() {
+    static const WORD MODIFIER_KEYS[] = {
+        VK_LMENU, VK_RMENU, VK_LCONTROL, VK_RCONTROL,
+        VK_LSHIFT, VK_RSHIFT, VK_LWIN, VK_RWIN,
+    };
+    std::vector<INPUT> inputs;
+    for (WORD key : MODIFIER_KEYS) {
+        if (!(GetAsyncKeyState(key) & 0x8000))
+            continue;
+        INPUT input = {};
+        input.type = INPUT_KEYBOARD;
+        input.ki.wVk = key;
+        input.ki.dwFlags = KEYEVENTF_KEYUP;
+        inputs.push_back(input);
+    }
+    if (!inputs.empty())
+        SendInput(static_cast<UINT>(inputs.size()), inputs.data(), sizeof(INPUT));
+}
+
 // Shared state for an off-thread UI Automation query. Held by shared_ptr so the
 // detached worker can safely finish writing even after we have given up waiting.
 struct FocusRectQuery {
@@ -661,6 +686,11 @@ bool WindowsIntegration::pasteWithClipboard(quintptr targetWindow, const QString
 bool WindowsIntegration::insertText(quintptr targetWindow, const QString &text, bool compatibilityPaste) {
     if (!isUsableTarget(targetWindow))
         return false;
+#ifdef Q_OS_WIN
+    // Alt is typically still held here (the skin-tone gesture), and it would
+    // ride along on whatever we inject next.
+    releaseHeldModifiers();
+#endif
     // Keyboard injection is ideal for a single Unicode scalar. Composite emoji
     // must be pasted atomically; some controls reorder ZWJ/variation inputs when
     // their UTF-16 units arrive as separate WM_CHAR messages.
