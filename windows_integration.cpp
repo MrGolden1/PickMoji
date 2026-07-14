@@ -94,6 +94,22 @@ bool toNativeHotkey(const QKeySequence &sequence, NativeHotkey &native, QString 
     return true;
 }
 
+// RegisterHotKey consumes the hotkey's own key, but the app underneath still
+// sees the bare Alt/Win press and release around it — and a lone Alt release is
+// the menu/ribbon activation gesture in Word, Slack and friends (which is why
+// the hotkey seemed to trigger extra actions there). Injecting a no-op key
+// (0xFF, assigned to nothing; the same mask AutoHotkey uses) while the modifier
+// is still down makes the apps read it as a combo instead, so no menu pops.
+void maskModifierMenuActivation() {
+    INPUT inputs[2] = {};
+    inputs[0].type = INPUT_KEYBOARD;
+    inputs[0].ki.wVk = 0xFF;
+    inputs[1].type = INPUT_KEYBOARD;
+    inputs[1].ki.wVk = 0xFF;
+    inputs[1].ki.dwFlags = KEYEVENTF_KEYUP;
+    SendInput(2, inputs, sizeof(INPUT));
+}
+
 // Shared state for an off-thread UI Automation query. Held by shared_ptr so the
 // detached worker can safely finish writing even after we have given up waiting.
 struct FocusRectQuery {
@@ -268,6 +284,11 @@ bool GlobalHotkey::nativeEventFilter(const QByteArray &, void *message, qintptr 
     if (nativeMessage && nativeMessage->message == WM_HOTKEY) {
         const int hotkeyId = static_cast<int>(nativeMessage->wParam);
         if (hotkeyId == HOTKEY_ID) {
+            const Qt::KeyboardModifiers modifiers = m_shortcut.isEmpty()
+                ? Qt::KeyboardModifiers(Qt::NoModifier)
+                : m_shortcut[0].keyboardModifiers();
+            if (modifiers & (Qt::AltModifier | Qt::MetaModifier))
+                maskModifierMenuActivation();
             emit activated();
             return true;
         }

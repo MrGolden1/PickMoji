@@ -316,6 +316,10 @@ void AppController::showPicker() {
             QTextStream(&log) << trace.join(QStringLiteral(" | ")) << '\n';
     }
 
+    // Seed the pointer edge-detector: a button still held from the click that
+    // opened us (tray icon, menu) must not read as a fresh outside press.
+    m_pointerWasDown = m_windows.isPointerButtonDown();
+
     m_windows.setWindowNoActivate(pickerHandle, true);
     m_picker.prepareForShow();
     m_picker.move(topLeft);
@@ -546,6 +550,12 @@ void AppController::onMonitorTick() {
         updateLastTarget();
         return;
     }
+    // Track the pointer-button edge even while a popup menu is open, so a press
+    // that merely closed the menu is not mistaken for a fresh one afterwards.
+    const bool pointerDown = m_windows.isPointerButtonDown();
+    const bool pressStarted = pointerDown && !m_pointerWasDown;
+    m_pointerWasDown = pointerDown;
+
     // The tone palette and the recents menu live outside the picker's own rect;
     // while one is open the pointer roams legitimately.
     if (m_picker.isVariantMenuOpen())
@@ -556,8 +566,9 @@ void AppController::onMonitorTick() {
     // hides itself on WindowDeactivate, but when the activation hand-off failed
     // (SetForegroundWindow can silently refuse), that event never comes and the
     // panel would be stuck; the pointer check is the backstop that always works.
-    if (m_windows.isPointerButtonDown()
-        && !m_picker.frameGeometry().contains(QCursor::pos())) {
+    // Edge-triggered: only a press *starting* outside dismisses — a drag that
+    // began inside (scrollbar, header) may leave the frame and come back.
+    if (pressStarted && !m_picker.frameGeometry().contains(QCursor::pos())) {
         m_picker.dismiss();
         return;
     }

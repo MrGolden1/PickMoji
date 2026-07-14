@@ -72,6 +72,10 @@ private:
     quintptr m_lastTarget = 0;
     quintptr m_activeTarget = 0;
     quintptr m_openForeground = 0;
+    // Last sampled pointer-button state: dismissal must trigger only on a press
+    // that *begins* outside the panel, or dragging the scrollbar (or the panel
+    // itself) past the frame's edge would count as a click-away.
+    bool m_pointerWasDown = false;
     bool m_debugAnchor = false;
     QString m_hotkeyWarning;
 };
