@@ -187,11 +187,13 @@ bool EmojiRepository::load() {
         bool hasSkinTone = false;
         skinToneFamilyKey(entry.emoji, &hasSkinTone);
         if (!hasSkinTone) {
-            const QString rawSearch = entry.emoji + QLatin1Char(' ') + entry.name + QLatin1Char(' ')
-                + entry.group + QLatin1Char(' ') + entry.subgroup + QLatin1Char(' ')
-                + groupSearchAliases(entry.group) + QLatin1Char(' ')
+            const QString ownSearch = entry.emoji + QLatin1Char(' ') + entry.name + QLatin1Char(' ')
                 + localizedKeywords.value(entry.emoji) + QLatin1Char(' ')
                 + externalKeywords.value(keywordKey(entry.emoji));
+            entry.ownSearchable = normalizeSearchText(ownSearch);
+            const QString rawSearch = ownSearch + QLatin1Char(' ')
+                + entry.group + QLatin1Char(' ') + entry.subgroup + QLatin1Char(' ')
+                + groupSearchAliases(entry.group);
             entry.searchable = normalizeSearchText(rawSearch);
         }
 

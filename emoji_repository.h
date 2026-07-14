@@ -10,6 +10,10 @@ struct EmojiEntry {
     QString group;
     QString subgroup;
     QString searchable;
+    // The emoji's own identity only — name and per-emoji keywords, without the
+    // group/subgroup/category terms that `searchable` adds. Search ranks a hit
+    // in here above one that only matched through a category keyword.
+    QString ownSearchable;
     QString variantBase;
     bool isSkinToneVariant = false;
 };

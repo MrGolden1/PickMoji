@@ -702,6 +702,18 @@ QVector<int> PickerWindow::search(const QString &rawQuery) const {
             rank += 85.0;
         else if (subgroup.startsWith(query))
             rank += 55.0;
+        // An emoji matched through its own name/keywords is what the user meant;
+        // one swept in only by a category keyword is a bystander. Large enough
+        // to also outweigh the subgroup and usage bonuses combined.
+        bool ownMatch = true;
+        for (const QString &term : terms) {
+            if (!entry.ownSearchable.contains(term)) {
+                ownMatch = false;
+                break;
+            }
+        }
+        if (ownMatch)
+            rank += 90.0;
         rank += std::min(30.0, m_usage->score(entry.emoji, now) * 2.0);
         matches.append({i, rank});
     }
@@ -743,9 +755,12 @@ void PickerWindow::rebuildSearchResults() {
 
 void PickerWindow::navigateTo(const QString &sectionId) {
     if (!m_search->text().isEmpty()) {
-        m_searchTimer->stop();
-        const QSignalBlocker blocker(m_search);
+        // No QSignalBlocker here: blocking the line edit's signals also freezes
+        // its clear-button animation, leaving a stale ✕ over the empty field.
+        // Let textChanged fire, then cancel the rebuild it scheduled — we
+        // rebuild ourselves right away.
         m_search->clear();
+        m_searchTimer->stop();
         rebuildNormalSections();
     }
 
@@ -774,9 +789,9 @@ void PickerWindow::prepareForShow() {
     m_autoHideArmed = false;
     m_typingMode = false;
     m_sessionRecorded.clear(); // usage counting is per panel-open
-    m_searchTimer->stop();
-    const QSignalBlocker blocker(m_search);
+    // Signals stay unblocked so the clear button hides itself (see navigateTo).
     m_search->clear();
+    m_searchTimer->stop();
     rebuildNormalSections();
     m_scrollArea->verticalScrollBar()->setValue(0);
     // Passive show: the target app keeps keyboard focus so click-to-insert

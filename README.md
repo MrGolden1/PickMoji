@@ -55,32 +55,19 @@ Run `dist/bin/PickMoji.exe`. The installed directory includes the required Qt ru
 ## Application icon
 
 The executable icon is embedded from `assets/PickMoji.ico` via `app.rc`. To regenerate it
-(and the MSIX logo assets) from the source design:
+from the source design:
 
 ```powershell
 pip install pillow
 python tools/generate_icon.py
 ```
 
-## Packaging (MSIX)
+## Releasing
 
-MSIX is the current Windows packaging standard: it gives a clean install/uninstall, a Start
-menu entry and tile, and is Store-ready. After building and deploying to `dist/`:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File packaging/msix/build-msix.ps1
-```
-
-The script stages `dist/`, packs a signed `.msix` into `build-msix/`, and (if needed) creates
-a self-signed certificate for local sideloading. It prints the exact commands to trust the
-certificate and install the package. For the Microsoft Store or production distribution, sign
-with a real code-signing certificate and set the matching `Publisher`/`Identity` in
-`packaging/msix/AppxManifest.xml`.
-
-> **Startup under MSIX:** the in-app "Start with Windows" toggle writes an `HKCU\...\Run`
-> entry, which is virtualized inside an MSIX package and will not launch the app at logon.
-> For the packaged build, manage startup from **Windows Settings → Apps → Startup**. The
-> toggle works as expected for the plain (non-packaged) build run from `dist/`.
+PickMoji is distributed as a portable app — no installer. Ship the contents of `dist/`
+(the exe plus the Qt runtime it was deployed with). To publish a *single-file* release
+on GitHub, build against a **static Qt** so `PickMoji.exe` is self-contained; the
+open-source repository satisfies Qt's LGPL terms for static linking.
 
 ## Updating Unicode data
 

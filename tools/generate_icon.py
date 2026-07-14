@@ -1,4 +1,4 @@
-"""Generate PickMoji's application icon and MSIX logo assets.
+"""Generate PickMoji's application icon.
 
 The artwork mirrors the runtime QIcon drawn in app_controller.cpp: a blue
 disc (#3390ec) with two white eyes and a white smile arc. Everything is drawn
@@ -14,7 +14,6 @@ from PIL import Image, ImageDraw
 
 BLUE = (51, 144, 236, 255)      # #3390ec, the in-app accent
 WHITE = (255, 255, 255, 255)
-TILE_BG = (23, 33, 43, 255)     # #17212b, the picker panel colour
 REF = 64.0                      # reference canvas used by createAppIcon()
 
 
@@ -51,9 +50,7 @@ def render(size, bg=None, supersample=4):
 def main():
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     assets_dir = os.path.join(root, "assets")
-    msix_dir = os.path.join(root, "packaging", "msix", "Assets")
     os.makedirs(assets_dir, exist_ok=True)
-    os.makedirs(msix_dir, exist_ok=True)
 
     # Multi-resolution .ico for the executable / Explorer.
     ico_sizes = [16, 24, 32, 48, 64, 128, 256]
@@ -61,26 +58,6 @@ def main():
     ico_path = os.path.join(assets_dir, "PickMoji.ico")
     base.save(ico_path, format="ICO", sizes=[(s, s) for s in ico_sizes])
     print("wrote", ico_path)
-
-    # MSIX square logos (transparent for the small ones, tinted tiles for big).
-    square_logos = {
-        "StoreLogo.png": (50, None),
-        "Square44x44Logo.png": (44, None),
-        "Square150x150Logo.png": (150, TILE_BG),
-        "Square310x310Logo.png": (310, TILE_BG),
-    }
-    for name, (size, bg) in square_logos.items():
-        path = os.path.join(msix_dir, name)
-        render(size, bg=bg).save(path, format="PNG")
-        print("wrote", path)
-
-    # Wide tile: logo centred on the branded background.
-    wide = Image.new("RGBA", (310, 150), TILE_BG)
-    logo = render(120)
-    wide.alpha_composite(logo, ((310 - 120) // 2, (150 - 120) // 2))
-    wide_path = os.path.join(msix_dir, "Wide310x150Logo.png")
-    wide.save(wide_path, format="PNG")
-    print("wrote", wide_path)
 
 
 if __name__ == "__main__":
