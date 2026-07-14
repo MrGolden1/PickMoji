@@ -23,6 +23,8 @@ public:
                   SingleInstance *singleInstance, QObject *parent = nullptr);
     void start(bool backgroundOnly);
     void renderPreview(const QString &path, const QString &sectionId = {}, int captureDelayMs = 230);
+    // Opt-in (--debug-anchor): append the anchor decision to %TEMP%/pickmoji-anchor.log
+    void setDebugAnchor(bool enabled) { m_debugAnchor = enabled; }
 
 public slots:
     void showPicker();
@@ -67,5 +69,6 @@ private:
     quintptr m_lastTarget = 0;
     quintptr m_activeTarget = 0;
     quintptr m_openForeground = 0;
+    bool m_debugAnchor = false;
     QString m_hotkeyWarning;
 };

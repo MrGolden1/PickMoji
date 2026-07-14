@@ -4,6 +4,7 @@
 #include <QClipboard>
 #include <QCoreApplication>
 #include <QCursor>
+#include <QElapsedTimer>
 #include <QGuiApplication>
 #include <QHash>
 #include <QKeyCombination>
@@ -424,8 +425,20 @@ QPoint WindowsIntegration::nativeToLogical(const QPoint &nativePoint) const {
     return nativePoint;
 }
 
-bool WindowsIntegration::focusedTextRect(QRect &logicalRect, int timeoutMs) const {
+void WindowsIntegration::warmUpCaretQuery() const {
 #ifdef Q_OS_WIN
+    // No one waits on this: it exists purely to pull UIAutomationCore and the COM
+    // proxies into the process ahead of the first user-visible query.
+    std::thread(runFocusRectQuery, std::make_shared<FocusRectQuery>()).detach();
+#endif
+}
+
+WindowsIntegration::CaretQuery WindowsIntegration::focusedTextRect(QRect &logicalRect,
+                                                                  int timeoutMs,
+                                                                  int *elapsedMs) const {
+#ifdef Q_OS_WIN
+    QElapsedTimer timer;
+    timer.start();
     auto state = std::make_shared<FocusRectQuery>();
     // Detached on purpose: UI Automation is cross-process COM and can block on a
     // busy target. We refuse to wait longer than the deadline; the worker keeps
@@ -433,25 +446,34 @@ bool WindowsIntegration::focusedTextRect(QRect &logicalRect, int timeoutMs) cons
     std::thread(runFocusRectQuery, state).detach();
 
     QRect native;
+    bool timedOut = false;
+    bool found = false;
     {
         std::unique_lock<std::mutex> lock(state->mutex);
-        if (!state->done.wait_for(lock, std::chrono::milliseconds(timeoutMs),
-                                  [&state] { return state->completed; })) {
-            return false;
+        timedOut = !state->done.wait_for(lock, std::chrono::milliseconds(timeoutMs),
+                                         [&state] { return state->completed; });
+        if (!timedOut) {
+            found = state->found;
+            native = state->rect;
         }
-        if (!state->found)
-            return false;
-        native = state->rect;
     }
+    if (elapsedMs)
+        *elapsedMs = static_cast<int>(timer.elapsed());
+
+    if (timedOut)
+        return CaretQuery::TimedOut;
+    if (!found)
+        return CaretQuery::NotFound;
 
     const QPoint topLeft = nativeToLogical(native.topLeft());
     const QPoint bottomRight = nativeToLogical(native.bottomRight());
     logicalRect = QRect(topLeft, bottomRight);
-    return logicalRect.height() > 0;
+    return logicalRect.height() > 0 ? CaretQuery::Found : CaretQuery::NotFound;
 #else
     Q_UNUSED(logicalRect);
     Q_UNUSED(timeoutMs);
-    return false;
+    Q_UNUSED(elapsedMs);
+    return CaretQuery::Unsupported;
 #endif
 }
 

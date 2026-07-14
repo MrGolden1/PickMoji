@@ -12,6 +12,8 @@
 #include <QCursor>
 #include <QDir>
 #include <QDialog>
+#include <QFile>
+#include <QTextStream>
 #include <QDialogButtonBox>
 #include <QGuiApplication>
 #include <QKeySequenceEdit>
@@ -38,8 +40,11 @@ constexpr int POLL_VISIBLE_MS = 40;
 constexpr int POLL_HIDDEN_MS = 300;
 constexpr int ANCHOR_GAP = 14;
 // Hard ceiling on how long we will wait for a UI Automation answer. A busy or
-// hung target app must delay the picker, never freeze it.
-constexpr int CARET_QUERY_TIMEOUT_MS = 120;
+// hung target app must delay the picker, never freeze it. This is generous
+// because the *first* query against a Chromium/Electron app also pays for that
+// app building its accessibility tree; a warm query answers in ~10ms, and an app
+// with no caret returns NotFound promptly rather than timing out.
+constexpr int CARET_QUERY_TIMEOUT_MS = 300;
 }
 
 AppController::AppController(const EmojiRepository *repository, UsageStore *usage,
@@ -79,6 +84,8 @@ AppController::AppController(const EmojiRepository *repository, UsageStore *usag
 void AppController::start(bool backgroundOnly) {
     QApplication::setQuitOnLastWindowClosed(false);
     setupTray();
+    if (followTextCursorEnabled())
+        m_windows.warmUpCaretQuery();
 
     QSettings settings(ORGANIZATION, APPLICATION);
     const QString savedText = settings.value(
@@ -309,15 +316,17 @@ QPoint AppController::boundedPickerPosition(const QPoint &anchor) const {
     if (above >= available.top())
         return QPoint(x, above);
 
-    // Too tall for the space above or below: sit beside the anchor rather than
-    // on top of the line the user is typing on.
+    // Too tall to fit above or below. Sitting *adjacent* to the anchor is wrong:
+    // the panel still lands on the line being typed, just to one side of the
+    // caret. Retreat to whichever screen edge has more room instead, so the text
+    // column the user is working in stays fully visible.
     const int y = std::clamp(anchor.y() - pickerSize.height() / 2,
                              available.top(), available.bottom() - pickerSize.height() + 1);
-    const bool anchorOnLeftHalf = anchor.x() < available.center().x();
-    const int sideX = anchorOnLeftHalf ? anchor.x() + ANCHOR_GAP
-                                       : anchor.x() - ANCHOR_GAP - pickerSize.width();
-    return QPoint(std::clamp(sideX, available.left(),
-                             available.right() - pickerSize.width() + 1), y);
+    const int roomLeft = anchor.x() - available.left();
+    const int roomRight = available.right() - anchor.x();
+    const int sideX = (roomRight >= roomLeft) ? available.right() - pickerSize.width() + 1
+                                              : available.left();
+    return QPoint(sideX, y);
 }
 
 bool AppController::isPlausibleAnchor(const QRect &rect) const {
@@ -337,23 +346,68 @@ bool AppController::isPlausibleAnchor(const QRect &rect) const {
 }
 
 QPoint AppController::anchorForPicker() const {
+    QStringList trace;
+    QPoint chosen;
+    bool haveChosen = false;
+
     if (followTextCursorEnabled()) {
         // 1) Classic Win32 caret: free and side-effect-free, so try it first.
         QPoint caret;
-        if (m_windows.caretPosition(m_activeTarget, caret))
-            return caret;
+        // Some apps leave a stale/hidden caret behind, so require it to actually
+        // land on a screen before trusting it.
+        if (m_windows.caretPosition(m_activeTarget, caret)
+            && QGuiApplication::screenAt(caret) != nullptr) {
+            trace << QStringLiteral("win32Caret=HIT(%1,%2)").arg(caret.x()).arg(caret.y());
+            chosen = caret;
+            haveChosen = true;
+        } else {
+            trace << QStringLiteral("win32Caret=MISS");
+        }
 
         // 2) UI Automation: the only way to find the caret in Chromium/Electron/
         //    UWP apps. Deliberately second, because querying it makes those apps
         //    build an accessibility tree (a real cost in *their* process).
-        QRect textRect;
-        if (m_windows.focusedTextRect(textRect, CARET_QUERY_TIMEOUT_MS)
-            && isPlausibleAnchor(textRect)) {
-            return QPoint(textRect.left(), textRect.bottom());
+        if (!haveChosen) {
+            QRect textRect;
+            int elapsed = 0;
+            const WindowsIntegration::CaretQuery status =
+                m_windows.focusedTextRect(textRect, CARET_QUERY_TIMEOUT_MS, &elapsed);
+            const char *statusText = "?";
+            switch (status) {
+            case WindowsIntegration::CaretQuery::Found: statusText = "FOUND"; break;
+            case WindowsIntegration::CaretQuery::NotFound: statusText = "NOTFOUND"; break;
+            case WindowsIntegration::CaretQuery::TimedOut: statusText = "TIMEOUT"; break;
+            case WindowsIntegration::CaretQuery::Unsupported: statusText = "UNSUPPORTED"; break;
+            }
+            trace << QStringLiteral("uia=%1 in %2ms rect=(%3,%4 %5x%6) plausible=%7")
+                         .arg(QLatin1String(statusText)).arg(elapsed)
+                         .arg(textRect.x()).arg(textRect.y())
+                         .arg(textRect.width()).arg(textRect.height())
+                         .arg(isPlausibleAnchor(textRect) ? "yes" : "no");
+            if (status == WindowsIntegration::CaretQuery::Found && isPlausibleAnchor(textRect)) {
+                chosen = QPoint(textRect.left(), textRect.bottom());
+                haveChosen = true;
+            }
+        }
+    } else {
+        trace << QStringLiteral("followTextCursor=off");
+    }
+
+    // 3) The pointer: always available, and on the monitor the user is using.
+    if (!haveChosen)
+        chosen = QCursor::pos();
+
+    if (m_debugAnchor) {
+        trace << QStringLiteral("source=%1 anchor=(%2,%3) panelSize=%4x%5")
+                     .arg(haveChosen ? "caret" : "mouse")
+                     .arg(chosen.x()).arg(chosen.y())
+                     .arg(m_picker.width()).arg(m_picker.height());
+        QFile log(QDir::tempPath() + QStringLiteral("/pickmoji-anchor.log"));
+        if (log.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text)) {
+            QTextStream(&log) << trace.join(QStringLiteral(" | ")) << '\n';
         }
     }
-    // 3) The pointer: always available, and on the monitor the user is using.
-    return QCursor::pos();
+    return chosen;
 }
 
 QPoint AppController::clampToScreen(const QPoint &topLeft) const {
