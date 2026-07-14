@@ -19,6 +19,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <limits>
 #include <condition_variable>
 #include <memory>
 #include <mutex>
@@ -406,29 +407,78 @@ bool WindowsIntegration::caretRect(quintptr targetWindow, QRect &logicalRect) co
 }
 
 QPoint WindowsIntegration::nativeToLogical(const QPoint &nativePoint) const {
-#ifdef Q_OS_WIN
-    const POINT point = {nativePoint.x(), nativePoint.y()};
-    const HMONITOR monitor = MonitorFromPoint(point, MONITOR_DEFAULTTONEAREST);
-    MONITORINFOEXW information = {};
-    information.cbSize = sizeof(information);
-    if (monitor && GetMonitorInfoW(monitor, &information)) {
-        // QScreen::name() on Windows is the GDI device name (\\.\DISPLAY1),
-        // which is exactly what MONITORINFOEX reports — a reliable pairing.
-        const QString deviceName = QString::fromWCharArray(information.szDevice);
-        const QList<QScreen *> screens = QGuiApplication::screens();
-        for (QScreen *screen : screens) {
-            if (screen->name() != deviceName)
-                continue;
-            const qreal ratio = screen->devicePixelRatio();
-            if (ratio <= 0.0)
-                break;
-            const QPoint offset(qRound((nativePoint.x() - information.rcMonitor.left) / ratio),
-                                qRound((nativePoint.y() - information.rcMonitor.top) / ratio));
-            return screen->geometry().topLeft() + offset;
+    // Pair the point to a screen by GEOMETRY, not by name. QScreen::name() on
+    // Windows is the monitor's model ("VG27AQ3A"), not the GDI device name
+    // ("\\.\DISPLAY5"), so matching on it silently never hits — which left every
+    // rect in physical pixels while the rest of the app worked in logical ones.
+    //
+    // Qt keeps each screen's origin unscaled and scales only its size, so a
+    // screen's native rect is (logical topLeft, logical size x dpr).
+    const QList<QScreen *> screens = QGuiApplication::screens();
+
+    const auto nativeRectOf = [](const QScreen *screen) {
+        const QRect logical = screen->geometry();
+        const qreal ratio = screen->devicePixelRatio();
+        return QRect(logical.topLeft(), QSize(qRound(logical.width() * ratio),
+                                              qRound(logical.height() * ratio)));
+    };
+
+    QScreen *match = nullptr;
+    for (QScreen *screen : screens) {
+        if (screen->devicePixelRatio() > 0.0 && nativeRectOf(screen).contains(nativePoint)) {
+            match = screen;
+            break;
         }
     }
+    if (!match) {
+        // Off-screen or stale coordinates: fall back to the nearest screen.
+        int bestDistance = std::numeric_limits<int>::max();
+        for (QScreen *screen : screens) {
+            if (screen->devicePixelRatio() <= 0.0)
+                continue;
+            const int distance = (nativeRectOf(screen).center() - nativePoint).manhattanLength();
+            if (distance < bestDistance) {
+                bestDistance = distance;
+                match = screen;
+            }
+        }
+    }
+    if (!match)
+        return nativePoint;
+
+    const qreal ratio = match->devicePixelRatio();
+    const QPoint origin = match->geometry().topLeft();
+    return origin + QPoint(qRound((nativePoint.x() - origin.x()) / ratio),
+                           qRound((nativePoint.y() - origin.y()) / ratio));
+}
+
+QStringList WindowsIntegration::describeScreens() const {
+    QStringList lines;
+    const QList<QScreen *> screens = QGuiApplication::screens();
+    for (QScreen *screen : screens) {
+        const QRect geometry = screen->geometry();
+        lines << QStringLiteral("qtScreen name='%1' geo=(%2,%3 %4x%5) dpr=%6")
+                     .arg(screen->name())
+                     .arg(geometry.x()).arg(geometry.y())
+                     .arg(geometry.width()).arg(geometry.height())
+                     .arg(screen->devicePixelRatio());
+    }
+#ifdef Q_OS_WIN
+    EnumDisplayMonitors(nullptr, nullptr, [](HMONITOR monitor, HDC, LPRECT, LPARAM param) -> BOOL {
+        auto *out = reinterpret_cast<QStringList *>(param);
+        MONITORINFOEXW information = {};
+        information.cbSize = sizeof(information);
+        if (GetMonitorInfoW(monitor, &information)) {
+            *out << QStringLiteral("win32Monitor name='%1' rc=(%2,%3 %4x%5)")
+                        .arg(QString::fromWCharArray(information.szDevice))
+                        .arg(information.rcMonitor.left).arg(information.rcMonitor.top)
+                        .arg(information.rcMonitor.right - information.rcMonitor.left)
+                        .arg(information.rcMonitor.bottom - information.rcMonitor.top);
+        }
+        return TRUE;
+    }, reinterpret_cast<LPARAM>(&lines));
 #endif
-    return nativePoint;
+    return lines;
 }
 
 void WindowsIntegration::warmUpCaretQuery() const {

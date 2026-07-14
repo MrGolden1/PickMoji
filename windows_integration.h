@@ -8,6 +8,7 @@
 #include <QRect>
 #include <QSize>
 #include <QString>
+#include <QStringList>
 
 class GlobalHotkey final : public QObject, public QAbstractNativeEventFilter {
     Q_OBJECT
@@ -76,6 +77,9 @@ public:
     // Win32/UIA report physical pixels while Qt works in logical ones; they only
     // coincide at 100% scaling. Everything handed back to Qt goes through this.
     QPoint nativeToLogical(const QPoint &nativePoint) const;
+
+    // Diagnostics: how Qt sees the screens vs how Win32 sees the monitors.
+    QStringList describeScreens() const;
     bool insertText(quintptr targetWindow, const QString &text, bool compatibilityPaste);
     // Toggle WS_EX_NOACTIVATE so the picker can float without stealing focus
     // (passive) yet still be activated on demand for search typing.

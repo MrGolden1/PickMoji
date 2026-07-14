@@ -94,6 +94,16 @@ void AppController::start(bool backgroundOnly) {
     if (followTextCursorEnabled())
         m_windows.warmUpCaretQuery();
 
+    if (m_debugAnchor) {
+        QFile log(QDir::tempPath() + QStringLiteral("/pickmoji-anchor.log"));
+        if (log.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text)) {
+            QTextStream stream(&log);
+            const QStringList lines = m_windows.describeScreens();
+            for (const QString &line : lines)
+                stream << line << '\n';
+        }
+    }
+
     QSettings settings(ORGANIZATION, APPLICATION);
     const QString savedText = settings.value(
         "globalShortcut", GlobalHotkey::defaultShortcut().toString(QKeySequence::PortableText)).toString();
@@ -333,6 +343,17 @@ QPoint AppController::pickerPosition(const QPoint &pointer, const QRect &keepCle
     QRect forbidden;
     if (keepClear.isValid() && keepClear.height() > 0)
         forbidden = keepClear.adjusted(-gap, -gap, gap, gap); // a little breathing room
+
+    if (trace) {
+        *trace << QStringLiteral("screen=(%1,%2 %3x%4) keepClear=%5")
+                      .arg(available.x()).arg(available.y())
+                      .arg(available.width()).arg(available.height())
+                      .arg(forbidden.isNull() ? QStringLiteral("NONE")
+                                              : QStringLiteral("(%1,%2 %3x%4)")
+                                                    .arg(forbidden.x()).arg(forbidden.y())
+                                                    .arg(forbidden.width())
+                                                    .arg(forbidden.height()));
+    }
 
     const int cx = pointer.x() - w / 2;
     const int cy = pointer.y() - h / 2;

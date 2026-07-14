@@ -31,7 +31,9 @@ int main(int argc, char *argv[]) {
     UsageStore usage;
     AppController controller(&repository, &usage, &singleInstance);
     const QStringList arguments = app.arguments();
-    controller.setDebugAnchor(arguments.contains(QStringLiteral("--debug-anchor")));
+    // TEMPORARY: anchor logging is on by default while we diagnose placement.
+    // Revert to opt-in (--debug-anchor) once positioning is settled.
+    controller.setDebugAnchor(!arguments.contains(QStringLiteral("--no-anchor-log")));
     const int previewIndex = arguments.indexOf(QStringLiteral("--render-preview"));
     const bool previewMode = previewIndex >= 0 && previewIndex + 1 < arguments.size();
     controller.start(previewMode || arguments.contains(QStringLiteral("--background")));
