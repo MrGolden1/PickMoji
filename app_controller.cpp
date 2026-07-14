@@ -546,19 +546,26 @@ void AppController::onMonitorTick() {
         updateLastTarget();
         return;
     }
-    // The tone palette lives outside the picker's own rect; typing mode is a real
-    // focused window and dismisses itself on deactivation.
-    if (m_picker.isTypingMode() || m_picker.isVariantMenuOpen())
+    // The tone palette and the recents menu live outside the picker's own rect;
+    // while one is open the pointer roams legitimately.
+    if (m_picker.isVariantMenuOpen())
         return;
 
-    // Click-outside dismissal. The picker never takes focus, so clicking back
-    // into the target app raises no deactivation event and does not even change
-    // the foreground window — the only reliable signal is the pointer itself.
+    // Click-outside dismissal, in *both* modes. Passive mode has no deactivation
+    // event to hang it on — the pointer is the only signal. Typing mode normally
+    // hides itself on WindowDeactivate, but when the activation hand-off failed
+    // (SetForegroundWindow can silently refuse), that event never comes and the
+    // panel would be stuck; the pointer check is the backstop that always works.
     if (m_windows.isPointerButtonDown()
         && !m_picker.frameGeometry().contains(QCursor::pos())) {
         m_picker.dismiss();
         return;
     }
+
+    // Typing mode is (nominally) a real focused window; the foreground check
+    // below would see the picker itself and misfire, so stop here.
+    if (m_picker.isTypingMode())
+        return;
 
     // Belt and braces: Alt+Tab or any other switch away from the app we opened
     // over also dismisses.
@@ -580,19 +587,12 @@ void AppController::chooseEmoji(const QString &emoji, bool copyOnly) {
 
     QTimer::singleShot(25, this, [this, target, emoji]() {
         const quintptr pickerHandle = static_cast<quintptr>(m_picker.winId());
-        const bool hadTarget = m_windows.isUsableTarget(target, pickerHandle);
-        const bool inserted = hadTarget
-            && m_windows.insertText(target, emoji, compatibilityPasteEnabled());
-        if (!inserted) {
-            QGuiApplication::clipboard()->setText(emoji);
-            // Only notify when a real target actively rejected the input. When
-            // nothing usable was focused, silently copy instead of nagging.
-            if (hadTarget && m_tray.isVisible()) {
-                m_tray.showMessage("Emoji copied",
-                                   "The target app rejected input, so the emoji was copied instead.",
-                                   QSystemTrayIcon::Information, 2600);
-            }
-        }
+        // No usable target, or the app swallowed the input: do nothing, like
+        // the native Windows panel. Hijacking the clipboard uninvited would
+        // clobber whatever the user had copied, and the toast was noise.
+        // Right-click / Shift+click remain the explicit ways to copy.
+        if (m_windows.isUsableTarget(target, pickerHandle))
+            m_windows.insertText(target, emoji, compatibilityPasteEnabled());
         // Return the picker to its passive, non-activating state so the next
         // click inserts without a focus round-trip. The target is foreground now
         // (insertText restored it if search had taken focus), so update the
