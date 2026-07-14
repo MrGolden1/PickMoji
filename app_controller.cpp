@@ -355,66 +355,72 @@ QPoint AppController::pickerPosition(const QPoint &pointer, const QRect &keepCle
                                                     .arg(forbidden.height()));
     }
 
-    const int cx = pointer.x() - w / 2;
-    const int cy = pointer.y() - h / 2;
-
-    QList<QPoint> candidates = {
-        {cx, pointer.y() + gap},                    // below
-        {pointer.x() + gap, pointer.y() + gap},     // below-right
-        {cx, pointer.y() - gap - h},                // above
-        {pointer.x() + gap, cy},                    // right
-        {pointer.x() - gap - w, cy},                // left
-        {pointer.x() - gap - w, pointer.y() + gap}, // below-left
-        {pointer.x() + gap, pointer.y() - gap - h}, // above-right
-        {pointer.x() - gap - w, pointer.y() - gap - h}, // above-left
+    // Keep every candidate on screen, then re-test it. Sliding a candidate back
+    // onto the screen is fine and looks natural; what matters is that the overlap
+    // check happens *after* the slide, so clamping can never silently re-cover
+    // the caret. (Requiring a perfect fit instead is what used to force the panel
+    // out to a screen corner.)
+    const int maxX = std::max(available.left(), available.right() - w + 1);
+    const int maxY = std::max(available.top(), available.bottom() - h + 1);
+    const auto onScreen = [&](const QPoint &p) {
+        return QPoint(std::clamp(p.x(), available.left(), maxX),
+                      std::clamp(p.y(), available.top(), maxY));
     };
-    // Last resorts: retreat to a screen edge, still on the pointer's monitor.
-    const int edgeY = std::clamp(cy, available.top(), available.bottom() - h + 1);
-    const int edgeX = std::clamp(cx, available.left(), available.right() - w + 1);
-    candidates << QPoint(available.right() - w + 1, edgeY)
-               << QPoint(available.left(), edgeY)
-               << QPoint(edgeX, available.top())
-               << QPoint(edgeX, available.bottom() - h + 1);
+
+    struct Candidate {
+        const char *label;
+        QPoint topLeft;
+    };
+    QList<Candidate> candidates;
+
+    // Preferred: hug the pointer, since that is where the user is looking.
+    const int px = pointer.x() - w / 2;
+    const int py = pointer.y() - h / 2;
+    candidates << Candidate{"belowPointer", {px, pointer.y() + gap}}
+               << Candidate{"abovePointer", {px, pointer.y() - gap - h}}
+               << Candidate{"rightOfPointer", {pointer.x() + gap, py}}
+               << Candidate{"leftOfPointer", {pointer.x() - gap - w, py}};
+
+    // Then hug the caret. If the pointer leaves no room, sitting directly under
+    // the text cursor is a natural home — far better than fleeing to a corner.
+    if (!forbidden.isNull()) {
+        const int kx = keepClear.center().x() - w / 2;
+        const int ky = keepClear.center().y() - h / 2;
+        candidates << Candidate{"belowCaret", {kx, keepClear.bottom() + gap}}
+                   << Candidate{"aboveCaret", {kx, keepClear.top() - gap - h}}
+                   << Candidate{"rightOfCaret", {keepClear.right() + gap, ky}}
+                   << Candidate{"leftOfCaret", {keepClear.left() - gap - w, ky}};
+    }
 
     QPoint best;
+    QString bestLabel;
     int bestOverlap = std::numeric_limits<int>::max();
-    int bestDistance = std::numeric_limits<int>::max();
-    bool haveBest = false;
 
-    for (const QPoint &candidate : std::as_const(candidates)) {
-        const QRect rect(candidate, size);
-        if (!available.contains(rect))
-            continue; // must fit without clamping, or clamping could re-cover the caret
-        const int overlap = overlapArea(rect, forbidden);
+    for (const Candidate &candidate : std::as_const(candidates)) {
+        const QPoint topLeft = onScreen(candidate.topLeft);
+        const int overlap = overlapArea(QRect(topLeft, size), forbidden);
         if (overlap == 0) {
             if (trace) {
-                *trace << QStringLiteral("place=clear(%1,%2)")
-                              .arg(candidate.x()).arg(candidate.y());
+                *trace << QStringLiteral("place=%1(%2,%3)")
+                              .arg(QLatin1String(candidate.label))
+                              .arg(topLeft.x()).arg(topLeft.y());
             }
-            return candidate;
+            return topLeft;
         }
-        // Nothing clean yet: remember the least-bad option.
-        const int distance = (rect.center() - pointer).manhattanLength();
-        if (overlap < bestOverlap || (overlap == bestOverlap && distance < bestDistance)) {
+        if (overlap < bestOverlap) {
             bestOverlap = overlap;
-            bestDistance = distance;
-            best = candidate;
-            haveBest = true;
+            best = topLeft;
+            bestLabel = QLatin1String(candidate.label);
         }
     }
 
-    if (haveBest) {
-        if (trace) {
-            *trace << QStringLiteral("place=leastOverlap(%1,%2) overlap=%3px2")
-                          .arg(best.x()).arg(best.y()).arg(bestOverlap);
-        }
-        return best;
+    // Nothing can clear the caret. Take the least-bad natural spot and accept
+    // covering it — that beats a position the user would find bizarre.
+    if (trace) {
+        *trace << QStringLiteral("place=%1(%2,%3) covered=%4px2")
+                      .arg(bestLabel).arg(best.x()).arg(best.y()).arg(bestOverlap);
     }
-
-    // The panel is larger than the work area itself; nothing can fit cleanly.
-    if (trace)
-        *trace << QStringLiteral("place=clamped");
-    return clampToScreen(QPoint(cx, pointer.y() + gap));
+    return best;
 }
 
 bool AppController::isPlausibleKeepClear(const QRect &rect) const {
