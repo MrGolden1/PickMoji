@@ -5,6 +5,8 @@
 #include <QCoreApplication>
 #include <QDir>
 #include <QFile>
+#include <QFont>
+#include <QFontMetrics>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -98,6 +100,24 @@ QHash<QString, QString> loadExternalKeywords() {
     return merged;
 }
 
+// Tests the same font family EmojiCanvas actually paints with, so a "yes" here
+// means it will really render and not fall back to a placeholder box. Joiners,
+// variation selectors and skin-tone modifiers are old, universally-supported
+// code points; skipping them means a brand-new *base* glyph is what gets
+// caught, rather than a false negative on an otherwise-fine ZWJ sequence.
+bool glyphRenders(const QString &emoji) {
+    static const QFontMetrics metrics{QFont(QStringLiteral("Segoe UI Emoji"))};
+    for (uint point : emoji.toUcs4()) {
+        if (point == 0x200D || point == 0xFE0E || point == 0xFE0F)
+            continue;
+        if (point >= 0x1F3FB && point <= 0x1F3FF)
+            continue;
+        if (!metrics.inFontUcs4(point))
+            return false;
+    }
+    return true;
+}
+
 QString skinToneFamilyKey(const QString &emoji, bool *removedTone) {
     QString result;
     bool found = false;
@@ -184,9 +204,13 @@ bool EmojiRepository::load() {
         if (!m_groups.contains(entry.group))
             m_groups.append(entry.group);
 
+        // Flags are painted from bundled Twemoji pixmaps (see EmojiCanvas), never
+        // as text, so Segoe's glyph coverage is irrelevant to whether they show.
+        entry.rendersLocally = entry.group == QLatin1String("Flags") || glyphRenders(entry.emoji);
+
         bool hasSkinTone = false;
         skinToneFamilyKey(entry.emoji, &hasSkinTone);
-        if (!hasSkinTone) {
+        if (!hasSkinTone && entry.rendersLocally) {
             const QString ownSearch = entry.emoji + QLatin1Char(' ') + entry.name + QLatin1Char(' ')
                 + localizedKeywords.value(entry.emoji) + QLatin1Char(' ')
                 + externalKeywords.value(keywordKey(entry.emoji));
@@ -222,7 +246,7 @@ bool EmojiRepository::load() {
             entry.isSkinToneVariant = true;
             entry.variantBase = m_entries.at(baseIndex).emoji;
             m_skinToneVariants[baseIndex].append(index);
-        } else {
+        } else if (entry.rendersLocally) {
             m_groupIndices[entry.group].append(index);
         }
     }

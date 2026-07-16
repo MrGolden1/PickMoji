@@ -16,6 +16,11 @@ struct EmojiEntry {
     QString ownSearchable;
     QString variantBase;
     bool isSkinToneVariant = false;
+    // Whether the installed emoji font actually has this glyph. Unicode adds
+    // new code points faster than Windows ships the matching Segoe UI Emoji
+    // glyphs, so the newest entries can render as an empty "tofu" box on a
+    // given system; those are excluded from the grid and search instead.
+    bool rendersLocally = true;
 };
 
 class EmojiRepository {
