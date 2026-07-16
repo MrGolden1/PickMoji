@@ -307,8 +307,8 @@ void AppController::showPicker() {
     // "still using the target app" from "switched to another window".
     m_openForeground = foreground;
 
-    // The pointer decides where the panel goes; the caret is a region it must
-    // not cover.
+    // The caret decides where the panel goes (below the line, else above); the
+    // pointer is only the fallback when no caret is available.
     QStringList trace;
     const QRect keepClear = keepClearRect(&trace);
     const QPoint pointer = QCursor::pos();
@@ -350,48 +350,23 @@ void AppController::togglePicker() {
 
 QPoint AppController::pickerPosition(const QPoint &pointer, const QRect &keepClear,
                                      QStringList *trace) const {
-    // The pointer decides *where* the panel wants to be; the caret decides where
-    // it may not go. We walk candidate placements around the pointer, then around
-    // the caret, and take the first that stays off the line being typed — or at
-    // least off the caret when the screen leaves no room for more.
-    QScreen *screen = QGuiApplication::screenAt(pointer);
-    if (!screen)
-        screen = QGuiApplication::primaryScreen();
-    const QRect available = screen ? screen->availableGeometry() : QRect(0, 0, 1920, 1080);
     const QSize size = m_picker.size();
     const int w = size.width();
     const int h = size.height();
     const int gap = ANCHOR_GAP;
+    const bool haveCaret = keepClear.isValid() && keepClear.height() > 0;
 
-    QRect forbidden;
-    if (keepClear.isValid() && keepClear.height() > 0)
-        forbidden = keepClear.adjusted(-gap, -gap, gap, gap); // a little breathing room
+    // Anchor to the screen the user is actually working on: the caret's when we
+    // have one (that is where they are typing), otherwise the pointer's. Picking
+    // the pointer's screen while placing relative to a caret on another monitor
+    // was a latent multi-monitor bug.
+    QScreen *screen = QGuiApplication::screenAt(haveCaret ? keepClear.center() : pointer);
+    if (!screen)
+        screen = QGuiApplication::primaryScreen();
+    const QRect available = screen ? screen->availableGeometry() : QRect(0, 0, 1920, 1080);
 
-    // The whole line being typed, not just the caret: text grows along the line,
-    // so a panel sharing that horizontal band soon hides what is being written
-    // even though it cleared the caret itself. Prefer placements that leave the
-    // entire band free; settle for merely clearing the caret when space is tight.
-    QRect lineBand;
-    if (!forbidden.isNull())
-        lineBand = QRect(available.left(), forbidden.top(),
-                         available.width(), forbidden.height());
-
-    if (trace) {
-        *trace << QStringLiteral("screen=(%1,%2 %3x%4) keepClear=%5")
-                      .arg(available.x()).arg(available.y())
-                      .arg(available.width()).arg(available.height())
-                      .arg(forbidden.isNull() ? QStringLiteral("NONE")
-                                              : QStringLiteral("(%1,%2 %3x%4)")
-                                                    .arg(forbidden.x()).arg(forbidden.y())
-                                                    .arg(forbidden.width())
-                                                    .arg(forbidden.height()));
-    }
-
-    // Keep every candidate on screen, then re-test it. Sliding a candidate back
-    // onto the screen is fine and looks natural; what matters is that the overlap
-    // check happens *after* the slide, so clamping can never silently re-cover
-    // the caret. (Requiring a perfect fit instead is what used to force the panel
-    // out to a screen corner.)
+    // Slide any spot back onto the screen, then re-test overlap afterwards, so
+    // clamping can never silently push the panel back over the caret.
     const int maxX = std::max(available.left(), available.right() - w + 1);
     const int maxY = std::max(available.top(), available.bottom() - h + 1);
     const auto onScreen = [&](const QPoint &p) {
@@ -399,70 +374,69 @@ QPoint AppController::pickerPosition(const QPoint &pointer, const QRect &keepCle
                       std::clamp(p.y(), available.top(), maxY));
     };
 
-    struct Candidate {
-        const char *label;
-        QPoint topLeft;
-    };
-    QList<Candidate> candidates;
-
-    // Preferred: hug the pointer, since that is where the user is looking.
-    const int px = pointer.x() - w / 2;
-    const int py = pointer.y() - h / 2;
-    candidates << Candidate{"belowPointer", {px, pointer.y() + gap}}
-               << Candidate{"abovePointer", {px, pointer.y() - gap - h}}
-               << Candidate{"rightOfPointer", {pointer.x() + gap, py}}
-               << Candidate{"leftOfPointer", {pointer.x() - gap - w, py}};
-
-    // Then hug the caret. If the pointer leaves no room, sitting directly under
-    // the text cursor is a natural home — far better than fleeing to a corner.
-    // Offsets come from `forbidden` (gap already included) so that a candidate
-    // flush against it counts as clear rather than overlapping by one row.
-    if (!forbidden.isNull()) {
-        const int kx = keepClear.center().x() - w / 2;
-        const int ky = keepClear.center().y() - h / 2;
-        candidates << Candidate{"belowCaret", {kx, forbidden.bottom() + 1}}
-                   << Candidate{"aboveCaret", {kx, forbidden.top() - h}}
-                   << Candidate{"rightOfCaret", {forbidden.right() + 1, ky}}
-                   << Candidate{"leftOfCaret", {forbidden.left() - w, ky}};
+    if (trace) {
+        *trace << QStringLiteral("screen=(%1,%2 %3x%4) mode=%5")
+                      .arg(available.x()).arg(available.y())
+                      .arg(available.width()).arg(available.height())
+                      .arg(haveCaret ? QStringLiteral("caret") : QStringLiteral("pointer"));
     }
 
-    QPoint best;
-    QString bestLabel;
-    int bestOverlap = std::numeric_limits<int>::max();
+    // Caret-first: open just below the line being typed, or above it when the
+    // bottom of the screen leaves no room. This mirrors the native Windows panel
+    // — the picker appears where you are typing every time, regardless of where
+    // the mouse sits, which is what makes it predictable. Placing below/above
+    // (never beside) also means text can grow along its line without ever sliding
+    // behind the panel, so there is nothing extra to keep clear.
+    if (haveCaret) {
+        const QRect forbidden = keepClear.adjusted(-gap, -gap, gap, gap);
+        // Left edge aligned to the caret, so the panel drops down-right (below)
+        // or up-right (above) from where you are typing — its near corner sits by
+        // the cursor instead of the whole panel straddling it. Clamped right when
+        // the caret is close to the screen's right edge.
+        const int cx = std::clamp(keepClear.left(), available.left(), maxX);
 
-    // Pass 0 avoids the whole typed line; pass 1 relaxes to just the caret.
-    for (int pass = 0; pass < 2; ++pass) {
-        const QRect &avoid = pass == 0 ? lineBand : forbidden;
-        if (pass == 0 && lineBand.isNull())
-            continue;
-        for (const Candidate &candidate : std::as_const(candidates)) {
-            const QPoint topLeft = onScreen(candidate.topLeft);
-            const int overlap = overlapArea(QRect(topLeft, size), avoid);
+        struct Spot { const char *label; QPoint topLeft; };
+        const Spot spots[] = {
+            {"belowCaret", {cx, forbidden.bottom() + 1}},
+            {"aboveCaret", {cx, forbidden.top() - h}},
+        };
+
+        QPoint best;
+        QString bestLabel;
+        int bestOverlap = std::numeric_limits<int>::max();
+        for (const Spot &spot : spots) {
+            const QPoint topLeft = onScreen(spot.topLeft);
+            const int overlap = overlapArea(QRect(topLeft, size), forbidden);
             if (overlap == 0) {
-                if (trace) {
-                    *trace << QStringLiteral("place=%1%2(%3,%4)")
-                                  .arg(QLatin1String(candidate.label),
-                                       pass == 0 && !forbidden.isNull()
-                                           ? QStringLiteral("+line") : QString())
-                                  .arg(topLeft.x()).arg(topLeft.y());
-                }
+                if (trace)
+                    *trace << QStringLiteral("place=%1(%2,%3)")
+                                  .arg(QLatin1String(spot.label)).arg(topLeft.x()).arg(topLeft.y());
                 return topLeft;
             }
-            if (pass == 1 && overlap < bestOverlap) {
+            if (overlap < bestOverlap) {
                 bestOverlap = overlap;
                 best = topLeft;
-                bestLabel = QLatin1String(candidate.label);
+                bestLabel = QLatin1String(spot.label);
             }
         }
+        // The panel is taller than the room both above and below the caret. Cover
+        // as little of it as possible rather than jump somewhere unexpected.
+        if (trace)
+            *trace << QStringLiteral("place=%1(%2,%3) covered=%4px2")
+                          .arg(bestLabel).arg(best.x()).arg(best.y()).arg(bestOverlap);
+        return best;
     }
 
-    // Nothing can clear the caret. Take the least-bad natural spot and accept
-    // covering it — that beats a position the user would find bizarre.
-    if (trace) {
-        *trace << QStringLiteral("place=%1(%2,%3) covered=%4px2")
-                      .arg(bestLabel).arg(best.x()).arg(best.y()).arg(bestOverlap);
-    }
-    return best;
+    // No caret (following is off, or the focused app exposes none): fall back to
+    // the pointer. There is nothing to keep clear, so sit below it — or above it
+    // when the pointer is near the bottom edge.
+    QPoint spot(pointer.x() - w / 2, pointer.y() + gap);
+    if (spot.y() + h > available.bottom() + 1)
+        spot.setY(pointer.y() - gap - h);
+    const QPoint topLeft = onScreen(spot);
+    if (trace)
+        *trace << QStringLiteral("place=pointer(%1,%2)").arg(topLeft.x()).arg(topLeft.y());
+    return topLeft;
 }
 
 bool AppController::isPlausibleKeepClear(const QRect &rect) const {
