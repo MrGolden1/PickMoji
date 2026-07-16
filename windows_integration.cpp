@@ -155,6 +155,30 @@ struct FocusRectQuery {
     QRect rect; // native/physical screen pixels
 };
 
+// Pull a bounding rectangle (physical pixels) out of a UIA text range. The
+// SAFEARRAY holds groups of four doubles: left, top, width, height.
+bool rectFromTextRange(IUIAutomationTextRange *range, QRect &out) {
+    SAFEARRAY *bounds = nullptr;
+    if (FAILED(range->GetBoundingRectangles(&bounds)) || !bounds)
+        return false;
+    bool ok = false;
+    LONG lower = 0;
+    LONG upper = -1;
+    double *values = nullptr;
+    if (SUCCEEDED(SafeArrayGetLBound(bounds, 1, &lower))
+        && SUCCEEDED(SafeArrayGetUBound(bounds, 1, &upper))
+        && upper - lower + 1 >= 4
+        && SUCCEEDED(SafeArrayAccessData(bounds, reinterpret_cast<void **>(&values)))) {
+        // A collapsed caret is zero-width; keep it at least 1px so it survives.
+        out = QRect(qRound(values[0]), qRound(values[1]),
+                    std::max(1, qRound(values[2])), qRound(values[3]));
+        ok = out.height() > 0;
+        SafeArrayUnaccessData(bounds);
+    }
+    SafeArrayDestroy(bounds);
+    return ok;
+}
+
 void runFocusRectQuery(std::shared_ptr<FocusRectQuery> state) {
     QRect result;
     bool found = false;
@@ -178,26 +202,43 @@ void runFocusRectQuery(std::shared_ptr<FocusRectQuery> state) {
                         ranges->get_Length(&count);
                         IUIAutomationTextRange *range = nullptr;
                         if (count > 0 && SUCCEEDED(ranges->GetElement(0, &range)) && range) {
-                            SAFEARRAY *bounds = nullptr;
-                            if (SUCCEEDED(range->GetBoundingRectangles(&bounds)) && bounds) {
-                                LONG lower = 0;
-                                LONG upper = -1;
-                                double *values = nullptr;
-                                // Groups of four doubles: left, top, width, height.
-                                if (SUCCEEDED(SafeArrayGetLBound(bounds, 1, &lower))
-                                    && SUCCEEDED(SafeArrayGetUBound(bounds, 1, &upper))
-                                    && upper - lower + 1 >= 4
-                                    && SUCCEEDED(SafeArrayAccessData(
-                                           bounds, reinterpret_cast<void **>(&values)))) {
-                                    // A collapsed caret is zero-width; keep it visible.
-                                    result = QRect(qRound(values[0]), qRound(values[1]),
-                                                   std::max(1, qRound(values[2])),
-                                                   qRound(values[3]));
-                                    found = result.height() > 0;
-                                    SafeArrayUnaccessData(bounds);
+                            // Is the selection collapsed (a caret) or a real
+                            // highlighted span?
+                            int endpointCompare = 1;
+                            const bool collapsed = SUCCEEDED(range->CompareEndpoints(
+                                    TextPatternRangeEndpoint_Start, range,
+                                    TextPatternRangeEndpoint_End, &endpointCompare))
+                                && endpointCompare == 0;
+
+                            bool haveRect = false;
+                            if (collapsed) {
+                                // A caret has no width of its own, and apps report
+                                // its rectangle inconsistently — some give nothing,
+                                // some give the whole line (VS Code). Neither
+                                // locates the caret, so ignore the range's own rect
+                                // and instead grow a clone by one character: the
+                                // char to the right of the caret (or the left one
+                                // at end of text). That character's box has an edge
+                                // at the caret's true x.
+                                IUIAutomationTextRange *caret = nullptr;
+                                if (SUCCEEDED(range->Clone(&caret)) && caret) {
+                                    int moved = 0;
+                                    if ((SUCCEEDED(caret->MoveEndpointByUnit(
+                                             TextPatternRangeEndpoint_End,
+                                             TextUnit_Character, 1, &moved)) && moved != 0)
+                                        || (SUCCEEDED(caret->MoveEndpointByUnit(
+                                                TextPatternRangeEndpoint_Start,
+                                                TextUnit_Character, -1, &moved)) && moved != 0)) {
+                                        haveRect = rectFromTextRange(caret, result);
+                                    }
+                                    caret->Release();
                                 }
-                                SafeArrayDestroy(bounds);
                             }
+                            // A real selection, or the one-character trick failed:
+                            // fall back to the range's own bounding rectangle.
+                            if (!haveRect)
+                                haveRect = rectFromTextRange(range, result);
+                            found = haveRect && result.height() > 0;
                             range->Release();
                         }
                         if (ranges)
