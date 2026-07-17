@@ -9,10 +9,10 @@ built-in emoji panel, with a look inspired by modern messaging apps.
 
 ## Download
 
-### [⬇ Download PickMoji 1.0.0](https://github.com/MrGolden1/PickMoji/releases/download/v1.0.0/PickMoji-1.0.0-Setup.exe)
+### [⬇ Download PickMoji 1.0.1](https://github.com/MrGolden1/PickMoji/releases/download/v1.0.1/PickMoji-1.0.1-Setup.exe)
 
 The installer — a small per-user install, no admin rights needed. Prefer not to install? Get
-the [portable ZIP](https://github.com/MrGolden1/PickMoji/releases/download/v1.0.0/PickMoji-1.0.0-win64.zip),
+the [portable ZIP](https://github.com/MrGolden1/PickMoji/releases/download/v1.0.1/PickMoji-1.0.1-win64.zip),
 unzip it anywhere, and run `PickMoji.exe`. All builds are on the
 [releases page](https://github.com/MrGolden1/PickMoji/releases).
 
