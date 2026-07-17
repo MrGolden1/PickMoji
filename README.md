@@ -128,3 +128,9 @@ Download the desired `emoji-test.txt` release and run:
 ```powershell
 python tools/generate_emoji_data.py data/emoji-test.txt data/emoji.json
 ```
+
+## License
+
+PickMoji is released under the [MIT License](LICENSE). It links Qt 6 dynamically under the
+LGPL v3, and bundles Twemoji flag graphics under CC BY 4.0 — see `THIRD_PARTY_NOTICES.md`
+and `TWEMOJI-LICENSE-GRAPHICS.txt`.

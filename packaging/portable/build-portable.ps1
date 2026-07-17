@@ -83,7 +83,7 @@ foreach ($need in "PickMoji.exe", "Qt6Core.dll", "Qt6Network.dll",
 
 # App data + notices.
 Copy-Item (Join-Path $repo "keywords") (Join-Path $stage "keywords") -Recurse
-foreach ($doc in "THIRD_PARTY_NOTICES.md", "TWEMOJI-LICENSE-GRAPHICS.txt") {
+foreach ($doc in "LICENSE", "THIRD_PARTY_NOTICES.md", "TWEMOJI-LICENSE-GRAPHICS.txt") {
     Copy-Item (Join-Path $repo $doc) $stage
 }
 
