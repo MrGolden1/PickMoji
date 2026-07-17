@@ -9,10 +9,10 @@ built-in emoji panel, with a look inspired by modern messaging apps.
 
 ## Download
 
-### [⬇ Download PickMoji 1.0.1](https://github.com/MrGolden1/PickMoji/releases/download/v1.0.1/PickMoji-1.0.1-Setup.exe)
+### [⬇ Download PickMoji 1.0.2](https://github.com/MrGolden1/PickMoji/releases/download/v1.0.2/PickMoji-1.0.2-Setup.exe)
 
 The installer — a small per-user install, no admin rights needed. Prefer not to install? Get
-the [portable ZIP](https://github.com/MrGolden1/PickMoji/releases/download/v1.0.1/PickMoji-1.0.1-win64.zip),
+the [portable ZIP](https://github.com/MrGolden1/PickMoji/releases/download/v1.0.2/PickMoji-1.0.2-win64.zip),
 unzip it anywhere, and run `PickMoji.exe`. All builds are on the
 [releases page](https://github.com/MrGolden1/PickMoji/releases).
 
@@ -41,7 +41,7 @@ Runs on any 64-bit Windows 10/11 PC (Intel or AMD; also ARM64 via emulation).
 - Non-activating window: it floats without stealing focus, so clicking an emoji inserts
   straight into the app you were using — no title-bar flicker
 - Escape/click-outside dismissal, system tray menu and start with Windows
-  (on by default; untick it in the tray menu to opt out)
+  (the installer enables it; toggle anytime in the tray menu)
 - Single-instance IPC: launching the application again reopens the existing picker
 
 Left-click to insert an emoji while keeping the picker open for more selections.

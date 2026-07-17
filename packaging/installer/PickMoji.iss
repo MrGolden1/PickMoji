@@ -59,6 +59,9 @@ Type: files; Name: "{app}\PickMoji.exe.old"
 Type: files; Name: "{app}\PickMoji.update-download.exe"
 
 [Code]
+var
+  gFreshInstall: Boolean;
+
 { A running PickMoji holds its own exe and Qt/CRT DLLs open, so neither an
   update-reinstall nor an uninstall can remove them. It runs from the tray and
   does not quit on a close message, so terminate it explicitly first. }
@@ -73,8 +76,22 @@ end;
 
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 begin
+  { Decide fresh install vs upgrade before files are replaced: PickMoji.exe is
+    only already present when upgrading. }
+  gFreshInstall := not FileExists(ExpandConstant('{app}\PickMoji.exe'));
   StopPickMoji;
   Result := '';
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  { A fresh install always enables "start with Windows" (a tray utility is dead
+    weight after a reboot if it isn't running to answer its hotkey). An upgrade
+    leaves whatever the user chose in the tray untouched. }
+  if (CurStep = ssPostInstall) and gFreshInstall then
+    RegWriteStringValue(HKEY_CURRENT_USER,
+      'Software\Microsoft\Windows\CurrentVersion\Run', 'PickMoji',
+      '"' + ExpandConstant('{app}\PickMoji.exe') + '" --background');
 end;
 
 function InitializeUninstall(): Boolean;
@@ -85,8 +102,8 @@ end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 begin
-  { PickMoji manages its own "start with Windows" entry (default on); it cannot
-    remove that on uninstall, so clear it here to avoid a stale autostart. }
+  { Clear the autostart entry so uninstall never leaves one pointing at a
+    deleted exe. }
   if CurUninstallStep = usUninstall then
     RegDeleteValue(HKEY_CURRENT_USER,
                    'Software\Microsoft\Windows\CurrentVersion\Run', 'PickMoji');

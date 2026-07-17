@@ -131,18 +131,10 @@ AppController::AppController(const EmojiRepository *repository, UsageStore *usag
 
 void AppController::start(bool backgroundOnly) {
     QApplication::setQuitOnLastWindowClosed(false);
-
-    // A tray utility that must already be running to answer its hotkey is dead
-    // weight after a reboot, so autostart defaults on. Applied exactly once:
-    // a user who later unticks it stays unticked.
-    {
-        QSettings settings(ORGANIZATION, APPLICATION);
-        if (!settings.value("startupDefaultApplied", false).toBool()) {
-            settings.setValue("startupDefaultApplied", true);
-            if (!startsWithWindows())
-                setStartWithWindows(true);
-        }
-    }
+    // Autostart is enabled by the installer on a fresh install and managed from
+    // the tray thereafter; the app no longer forces a default on first run
+    // (that relied on a flag that survived uninstall, so reinstalls never
+    // re-enabled it — see the installer's fresh-install detection instead).
     setupTray();
     if (followTextCursorEnabled())
         m_windows.warmUpCaretQuery();
