@@ -396,6 +396,7 @@ void AppController::showPicker() {
     // pointer is only the fallback when no caret is available.
     QStringList trace;
     const QRect keepClear = keepClearRect(&trace);
+    adaptPickerHeight(keepClear); // fit the panel to the room before positioning
     const QPoint pointer = QCursor::pos();
     const QPoint topLeft = pickerPosition(pointer, keepClear, &trace);
     if (m_debugAnchor) {
@@ -431,6 +432,25 @@ void AppController::togglePicker() {
         m_picker.dismiss(); // routes through hiddenByUser: menu text, poll rate, trim
     else
         showPicker();
+}
+
+void AppController::adaptPickerHeight(const QRect &keepClear) {
+    if (!(keepClear.isValid() && keepClear.height() > 0)) {
+        m_picker.setActiveHeight(m_picker.fullHeight()); // no caret: restore full size
+        return;
+    }
+    QScreen *screen = QGuiApplication::screenAt(keepClear.center());
+    if (!screen)
+        screen = QGuiApplication::primaryScreen();
+    const QRect available = screen ? screen->availableGeometry() : QRect(0, 0, 1920, 1080);
+    const QRect forbidden = keepClear.adjusted(-ANCHOR_GAP, -ANCHOR_GAP, ANCHOR_GAP, ANCHOR_GAP);
+    // The vertical room the panel could occupy on each side of the typed line.
+    const int roomBelow = available.bottom() - forbidden.bottom();
+    const int roomAbove = forbidden.top() - available.top();
+    // Size to the larger side; setActiveHeight clamps to [minUseful, full], so a
+    // roomy screen keeps the full panel and a short one gets a shorter, scrollable
+    // panel that still sits clear of the caret.
+    m_picker.setActiveHeight(std::max(roomBelow, roomAbove));
 }
 
 QPoint AppController::pickerPosition(const QPoint &pointer, const QRect &keepClear,
@@ -479,17 +499,30 @@ QPoint AppController::pickerPosition(const QPoint &pointer, const QRect &keepCle
         // the cursor instead of the whole panel straddling it. Clamped right when
         // the caret is close to the screen's right edge.
         const int cx = std::clamp(keepClear.left(), available.left(), maxX);
+        // For the beside-the-caret fallbacks: vertically centred on the line.
+        const int cy = std::clamp(keepClear.center().y() - h / 2, available.top(), maxY);
+        // On a short (laptop) screen a caret mid-screen may have room for the
+        // panel neither below nor above the line. Try beside it next — the panel
+        // is tall but laptops are wide, so the cursor stays visible instead of
+        // being covered. Prefer the side with more room.
+        const bool moreRoomRight =
+            (available.right() - forbidden.right()) >= (forbidden.left() - available.left());
 
         struct Spot { const char *label; QPoint topLeft; };
-        const Spot spots[] = {
-            {"belowCaret", {cx, forbidden.bottom() + 1}},
-            {"aboveCaret", {cx, forbidden.top() - h}},
-        };
+        QList<Spot> spots;
+        spots << Spot{"belowCaret", {cx, forbidden.bottom() + 1}}
+              << Spot{"aboveCaret", {cx, forbidden.top() - h}};
+        const Spot rightOf{"rightOfCaret", {forbidden.right() + 1, cy}};
+        const Spot leftOf{"leftOfCaret", {forbidden.left() - w, cy}};
+        if (moreRoomRight)
+            spots << rightOf << leftOf;
+        else
+            spots << leftOf << rightOf;
 
         QPoint best;
         QString bestLabel;
         int bestOverlap = std::numeric_limits<int>::max();
-        for (const Spot &spot : spots) {
+        for (const Spot &spot : std::as_const(spots)) {
             const QPoint topLeft = onScreen(spot.topLeft);
             const int overlap = overlapArea(QRect(topLeft, size), forbidden);
             if (overlap == 0) {
@@ -504,8 +537,8 @@ QPoint AppController::pickerPosition(const QPoint &pointer, const QRect &keepCle
                 bestLabel = QLatin1String(spot.label);
             }
         }
-        // The panel is taller than the room both above and below the caret. Cover
-        // as little of it as possible rather than jump somewhere unexpected.
+        // Even beside the caret there is no clear spot (a very small screen).
+        // Cover as little as possible rather than jump somewhere unexpected.
         if (trace)
             *trace << QStringLiteral("place=%1(%2,%3) covered=%4px2")
                           .arg(bestLabel).arg(best.x()).arg(best.y()).arg(bestOverlap);

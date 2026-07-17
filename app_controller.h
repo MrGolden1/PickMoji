@@ -47,6 +47,10 @@ private:
     QRect keepClearRect(QStringList *trace) const;
     QPoint pickerPosition(const QPoint &pointer, const QRect &keepClear,
                           QStringList *trace) const;
+    // Shrink the panel to the room above/below the caret before positioning, so
+    // a tall panel on a short screen fits below the line (scrollable) instead of
+    // covering it or being squeezed to the side.
+    void adaptPickerHeight(const QRect &keepClear);
     bool isPlausibleKeepClear(const QRect &rect) const;
     QIcon createAppIcon() const;
     bool compatibilityPasteEnabled() const;

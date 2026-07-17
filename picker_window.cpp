@@ -268,7 +268,8 @@ PickerWindow::PickerWindow(const EmojiRepository *repository, UsageStore *usage,
     // Show without stealing focus from the app the user is typing in; the
     // controller also applies WS_EX_NOACTIVATE so clicks never activate us.
     setAttribute(Qt::WA_ShowWithoutActivating, true);
-    setFixedSize(BASE_PANEL_WIDTH, BASE_PANEL_HEIGHT);
+    m_presetSize = QSize(BASE_PANEL_WIDTH, BASE_PANEL_HEIGHT);
+    setFixedSize(m_presetSize);
     setupUi();
     applyStyles(1.0);
     rebuildNormalSections();
@@ -864,10 +865,27 @@ void PickerWindow::setPanelSizeIndex(int index) {
     applyStyles(scale);
     applyChromeScale(scale);
     m_canvas->setScale(scale);
-    setFixedSize(qRound(BASE_PANEL_WIDTH * scale), qRound(BASE_PANEL_HEIGHT * scale));
+    m_presetSize = QSize(qRound(BASE_PANEL_WIDTH * scale), qRound(BASE_PANEL_HEIGHT * scale));
+    setFixedSize(m_presetSize);
     QSettings(QStringLiteral("PickMoji"), QStringLiteral("PickMoji"))
         .setValue(QStringLiteral("panelSizeLevel2"), index);
     emit panelSizeChanged(index);
+}
+
+int PickerWindow::minPanelHeight() const {
+    // Header + search + a few emoji rows: below this a height-limited panel is
+    // too cramped to be worth it, and the caller places beside the caret instead.
+    const double scale = PANEL_PRESETS.at(m_panelSizeIndex).scale;
+    return qRound((BASE_HEADER_HEIGHT + BASE_SEARCH_HEIGHT + 200) * scale);
+}
+
+void PickerWindow::setActiveHeight(int targetHeight) {
+    // Shrink (never grow past the preset) so the panel fits the room above or
+    // below the caret on a short screen; the emoji grid just scrolls. Width is
+    // untouched, so only the number of visible rows changes.
+    const int h = std::clamp(targetHeight, minPanelHeight(), m_presetSize.height());
+    if (this->height() != h || this->width() != m_presetSize.width())
+        setFixedSize(m_presetSize.width(), h);
 }
 
 void PickerWindow::cyclePanelSize(int delta) {

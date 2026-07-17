@@ -5,6 +5,7 @@
 #include <QHash>
 #include <QPointer>
 #include <QSet>
+#include <QSize>
 #include <QVector>
 #include <QWidget>
 
@@ -44,6 +45,12 @@ public:
     void cyclePanelSize(int delta);
     static QStringList panelSizeLabels();
 
+    // The panel's height at the current size preset, and a setter that shrinks it
+    // (never past the preset) to fit the space above/below the caret on a short
+    // screen. Width is unaffected — only the number of visible emoji rows changes.
+    int fullHeight() const { return m_presetSize.height(); }
+    void setActiveHeight(int targetHeight);
+
 signals:
     void emojiChosen(const QString &emoji, bool copyOnly);
     void hiddenByUser();
@@ -74,6 +81,7 @@ private:
     void recordUsage(const QString &emoji);
     void hidePicker();
     void applyChromeScale(double scale);
+    int minPanelHeight() const;
 
     const EmojiRepository *m_repository = nullptr;
     UsageStore *m_usage = nullptr;
@@ -95,4 +103,5 @@ private:
     bool m_variantSelectionInProgress = false;
     bool m_typingMode = false;
     int m_panelSizeIndex = 0;
+    QSize m_presetSize; // full panel size for the current preset (before any fit-shrink)
 };
