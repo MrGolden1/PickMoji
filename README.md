@@ -9,10 +9,11 @@ built-in emoji panel, with a look inspired by modern messaging apps.
 
 ## Download
 
-**[⬇ Download PickMoji 1.0.0](https://github.com/MrGolden1/PickMoji/releases/download/v1.0.0/PickMoji-1.0.0-Setup.exe)**
-— the installer (a small per-user install, no admin rights needed). Prefer not to install?
-Get the [portable ZIP](https://github.com/MrGolden1/PickMoji/releases/download/v1.0.0/PickMoji-1.0.0-win64.zip),
-unzip it anywhere, and run `PickMoji.exe`. Older/newer builds are on the
+### [⬇ Download PickMoji 1.0.0](https://github.com/MrGolden1/PickMoji/releases/download/v1.0.0/PickMoji-1.0.0-Setup.exe)
+
+The installer — a small per-user install, no admin rights needed. Prefer not to install? Get
+the [portable ZIP](https://github.com/MrGolden1/PickMoji/releases/download/v1.0.0/PickMoji-1.0.0-win64.zip),
+unzip it anywhere, and run `PickMoji.exe`. All builds are on the
 [releases page](https://github.com/MrGolden1/PickMoji/releases).
 
 Then press **Alt + .** in any app and click an emoji — it drops straight into whatever you
@@ -112,8 +113,9 @@ the version the app reports and compares against), then create a GitHub Release 
 tag is that version (e.g. `v1.1.0`) and attach:
 
 - **`PickMoji-<version>-Setup.exe`** — the installer; the recommended download for new users.
-- **`PickMoji.exe`** — the bare executable the in-app updater downloads and swaps in.
-  GitHub computes its SHA-256 digest automatically, which the updater verifies.
+- **`PickMoji-update.exe`** — the bare executable the in-app updater downloads and swaps in
+  (GitHub computes its SHA-256 digest automatically, which the updater verifies). It has no
+  DLLs beside it, so it only works as an update payload — never a standalone download.
 - **`PickMoji-<version>-win64.zip`** — optional portable package for the no-install crowd.
 
 > **Note:** the one-click updater swaps only `PickMoji.exe`, so it is safe only when the

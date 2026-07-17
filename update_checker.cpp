@@ -84,17 +84,18 @@ void UpdateChecker::onReleaseReply(QNetworkReply *reply, bool userInitiated) {
         return;
     }
 
-    // Locate the bare "PickMoji.exe" asset (and, if present, its SHA-256 digest).
-    // Match the name exactly, NOT just any .exe: a release also carries
-    // "PickMoji-<version>-Setup.exe", and swapping the installer in as the
-    // running program would break the app.
+    // Locate the update payload, an asset named exactly "PickMoji-update.exe".
+    // It is the bare executable (no DLLs) — useless to download on its own, so
+    // named distinctly from the "PickMoji-<version>-Setup.exe" installer both to
+    // stop users clicking the wrong file and so the updater never swaps the
+    // installer in as the running program.
     m_downloadUrl.clear();
     m_expectedSha256.clear();
     const QJsonArray assets = root.value(QStringLiteral("assets")).toArray();
     for (const QJsonValue &value : assets) {
         const QJsonObject asset = value.toObject();
         if (asset.value(QStringLiteral("name")).toString()
-                .compare(QStringLiteral("PickMoji.exe"), Qt::CaseInsensitive) != 0)
+                .compare(QStringLiteral("PickMoji-update.exe"), Qt::CaseInsensitive) != 0)
             continue;
         m_downloadUrl = asset.value(QStringLiteral("browser_download_url")).toString();
         const QString digest = asset.value(QStringLiteral("digest")).toString();
@@ -105,7 +106,7 @@ void UpdateChecker::onReleaseReply(QNetworkReply *reply, bool userInitiated) {
 
     if (m_downloadUrl.isEmpty()) {
         if (userInitiated)
-            emit checkFailed(QStringLiteral("The latest release has no PickMoji.exe asset."));
+            emit checkFailed(QStringLiteral("The latest release has no PickMoji-update.exe asset."));
         return;
     }
 

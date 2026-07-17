@@ -92,7 +92,13 @@ $zip = Join-Path $stageRoot "PickMoji-$version-win64.zip"
 Remove-Item -Force $zip -ErrorAction SilentlyContinue
 Compress-Archive -Path $stage -DestinationPath $zip
 
+# The in-app updater's payload: the bare exe, named distinctly from the installer
+# so it is obvious it is not a standalone download. Ready to attach to a release.
+$updateExe = Join-Path $stageRoot "PickMoji-update.exe"
+Copy-Item (Join-Path $stage "PickMoji.exe") $updateExe -Force
+
 $size = [math]::Round((Get-Item $zip).Length / 1MB, 1)
 Write-Host ""
 Write-Host "Portable package : $zip  (${size} MB)"
+Write-Host "Update payload   : $updateExe"
 Write-Host "Staging folder   : $stage"
