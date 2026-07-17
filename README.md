@@ -9,10 +9,11 @@ built-in emoji panel, with a look inspired by modern messaging apps.
 
 ## Download
 
-**[⬇ Get the latest release](https://github.com/MrGolden1/PickMoji/releases/latest)** —
-download `PickMoji-<version>-Setup.exe` and run it (a small per-user install, no admin
-rights needed). Prefer not to install? Grab the portable `PickMoji-<version>-win64.zip`,
-unzip it anywhere, and run `PickMoji.exe`.
+**[⬇ Download PickMoji 1.0.0](https://github.com/MrGolden1/PickMoji/releases/download/v1.0.0/PickMoji-1.0.0-Setup.exe)**
+— the installer (a small per-user install, no admin rights needed). Prefer not to install?
+Get the [portable ZIP](https://github.com/MrGolden1/PickMoji/releases/download/v1.0.0/PickMoji-1.0.0-win64.zip),
+unzip it anywhere, and run `PickMoji.exe`. Older/newer builds are on the
+[releases page](https://github.com/MrGolden1/PickMoji/releases).
 
 Then press **Alt + .** in any app and click an emoji — it drops straight into whatever you
 were typing, no window switch. PickMoji keeps a smart frequently-used list, searches in
