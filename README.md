@@ -1,7 +1,24 @@
 # PickMoji
 
-A fast, native Qt 6 emoji picker for Windows — a lightweight replacement for the
-built-in emoji panel, with a look inspired by modern messaging-app pickers.
+A fast, native emoji picker for Windows — a lightweight, trustworthy replacement for the
+built-in emoji panel, with a look inspired by modern messaging apps.
+
+<p align="center">
+  <img src="docs/screenshot.png" alt="PickMoji picker" width="380">
+</p>
+
+## Download
+
+**[⬇ Get the latest release](https://github.com/MrGolden1/PickMoji/releases/latest)** —
+download `PickMoji-<version>-Setup.exe` and run it (a small per-user install, no admin
+rights needed). Prefer not to install? Grab the portable `PickMoji-<version>-win64.zip`,
+unzip it anywhere, and run `PickMoji.exe`.
+
+Then press **Alt + .** in any app and click an emoji — it drops straight into whatever you
+were typing, no window switch. PickMoji keeps a smart frequently-used list, searches in
+English and Persian, and quietly updates itself when a new version ships.
+
+Runs on any 64-bit Windows 10/11 PC (Intel or AMD; also ARM64 via emulation).
 
 ## Features
 
@@ -62,12 +79,47 @@ pip install pillow
 python tools/generate_icon.py
 ```
 
-## Releasing
+## Releasing & updates
 
-PickMoji is distributed as a portable app — no installer. Ship the contents of `dist/`
-(the exe plus the Qt runtime it was deployed with). To publish a *single-file* release
-on GitHub, build against a **static Qt** so `PickMoji.exe` is self-contained; the
-open-source repository satisfies Qt's LGPL terms for static linking.
+PickMoji ships as a **per-user installer** (Inno Setup) — no admin, no UAC. It installs
+into `%LOCALAPPDATA%\Programs\PickMoji` with a Start Menu shortcut and a proper entry in
+Settings → Apps, so a stray "delete a file in Downloads" can't break it. The install
+folder is user-writable, so the in-app updater can swap the exe without elevation.
+
+Build the Release target, then compile the installer (requires Inno Setup 6 —
+`winget install -e --id JRSoftware.InnoSetup`):
+
+```powershell
+cmake --build build-release
+powershell -ExecutionPolicy Bypass -File packaging/installer/build-installer.ps1
+# -> build-portable/PickMoji-<version>-Setup.exe
+```
+
+`build-installer.ps1` first stages a clean runtime with `packaging/portable/build-portable.ps1`,
+which on its own also produces a portable `PickMoji-<version>-win64.zip` (one folder,
+`PickMoji.exe` at its root, Qt runtime beside it) for users who prefer no install.
+
+### In-app updates
+
+PickMoji checks the `MrGolden1/PickMoji` GitHub releases at most once a day (a tray
+toggle, off-switchable — it is the app's only network access) and can update itself in
+one click: it downloads the new executable, verifies its SHA-256 against the release
+asset's digest, swaps it in and relaunches.
+
+To publish an update, bump `project(PickMoji VERSION ...)` in `CMakeLists.txt` (this is
+the version the app reports and compares against), then create a GitHub Release whose
+tag is that version (e.g. `v1.1.0`) and attach:
+
+- **`PickMoji-<version>-Setup.exe`** — the installer; the recommended download for new users.
+- **`PickMoji.exe`** — the bare executable the in-app updater downloads and swaps in.
+  GitHub computes its SHA-256 digest automatically, which the updater verifies.
+- **`PickMoji-<version>-win64.zip`** — optional portable package for the no-install crowd.
+
+> **Note:** the one-click updater swaps only `PickMoji.exe`, so it is safe only when the
+> bundled Qt runtime is unchanged between releases (the usual case for app-only updates).
+> A release that upgrades Qt or other bundled DLLs should be delivered as a fresh
+> installer/ZIP. A future static single-file build would remove this caveat entirely — one
+> file to swap, no DLLs.
 
 ## Updating Unicode data
 
