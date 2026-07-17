@@ -10,6 +10,7 @@
 #include <QClipboard>
 #include <QCoreApplication>
 #include <QCursor>
+#include <QDateTime>
 #include <QDir>
 #include <QDialog>
 #include <QFile>
@@ -90,6 +91,40 @@ AppController::AppController(const EmojiRepository *repository, UsageStore *usag
     connect(m_singleInstance, &SingleInstance::showRequested, this, &AppController::showPicker);
     connect(qApp, &QCoreApplication::aboutToQuit, m_usage, &UsageStore::flush);
 
+    connect(&m_updater, &UpdateChecker::updateAvailable, this, &AppController::onUpdateAvailable);
+    connect(&m_updater, &UpdateChecker::upToDate, this, [this]() {
+        if (m_tray.isVisible())
+            m_tray.showMessage(QStringLiteral("PickMoji is up to date"),
+                               QStringLiteral("You have the latest version (%1).")
+                                   .arg(QCoreApplication::applicationVersion()),
+                               QSystemTrayIcon::Information, 3500);
+    });
+    connect(&m_updater, &UpdateChecker::checkFailed, this, [this](const QString &reason) {
+        if (m_tray.isVisible())
+            m_tray.showMessage(QStringLiteral("Could not check for updates"), reason,
+                               QSystemTrayIcon::Warning, 4000);
+    });
+    connect(&m_updater, &UpdateChecker::updateFailed, this, [this](const QString &reason) {
+        if (m_tray.isVisible())
+            m_tray.showMessage(QStringLiteral("Update failed"), reason,
+                               QSystemTrayIcon::Warning, 6000);
+    });
+    // The new binary is in place; hand the single-instance slot to the relaunch.
+    connect(&m_updater, &UpdateChecker::aboutToRelaunch, this, [this]() {
+        m_usage->flush();
+        m_singleInstance->release();
+    });
+    // Clicking the "update available" balloon accepts it.
+    connect(&m_tray, &QSystemTrayIcon::messageClicked, this, [this]() {
+        if (!m_updatePromptPending)
+            return;
+        m_updatePromptPending = false;
+        m_tray.showMessage(QStringLiteral("Updating PickMoji"),
+                           QStringLiteral("Downloading version %1…").arg(m_updater.latestVersion()),
+                           QSystemTrayIcon::Information, 3000);
+        m_updater.downloadAndApply();
+    });
+
     m_targetMonitor.setInterval(300);
     connect(&m_targetMonitor, &QTimer::timeout, this, &AppController::onMonitorTick);
 }
@@ -138,6 +173,9 @@ void AppController::start(bool backgroundOnly) {
     updateShortcutUi();
     m_targetMonitor.start();
     updateLastTarget();
+
+    UpdateChecker::cleanupAfterUpdate();
+    maybeAutoCheckForUpdates();
 
     if (!backgroundOnly)
         showPicker();
@@ -218,6 +256,22 @@ void AppController::setupTray() {
     connect(m_startupAction, &QAction::toggled, this, &AppController::setStartWithWindows);
 
     m_trayMenu->addSeparator();
+    m_checkUpdateAction = m_trayMenu->addAction("Check for updates…");
+    connect(m_checkUpdateAction, &QAction::triggered, this, [this]() {
+        m_updater.checkForUpdates(true);
+    });
+    m_autoUpdateAction = m_trayMenu->addAction("Check for updates automatically");
+    m_autoUpdateAction->setCheckable(true);
+    m_autoUpdateAction->setToolTip(
+        "Contact github.com once a day to see if a newer PickMoji is available. "
+        "This is the only network connection PickMoji makes.");
+    m_autoUpdateAction->setChecked(autoUpdateEnabled());
+    connect(m_autoUpdateAction, &QAction::toggled, this, &AppController::setAutoUpdateEnabled);
+
+    QAction *aboutAction = m_trayMenu->addAction("About PickMoji");
+    connect(aboutAction, &QAction::triggered, this, &AppController::showAboutDialog);
+
+    m_trayMenu->addSeparator();
     QAction *exitAction = m_trayMenu->addAction("Exit");
     connect(exitAction, &QAction::triggered, qApp, &QCoreApplication::quit);
 
@@ -274,6 +328,45 @@ void AppController::showShortcutDialog() {
         updateShortcutUi();
         dialog.accept();
     });
+    dialog.exec();
+}
+
+void AppController::showAboutDialog() {
+    QDialog dialog;
+    dialog.setWindowTitle(QStringLiteral("About PickMoji"));
+    dialog.setWindowIcon(m_picker.windowIcon());
+    dialog.setMinimumWidth(320);
+
+    auto *layout = new QVBoxLayout(&dialog);
+    layout->setContentsMargins(24, 20, 24, 16);
+    layout->setSpacing(10);
+
+    auto *icon = new QLabel(&dialog);
+    icon->setPixmap(createAppIcon().pixmap(56, 56));
+    icon->setAlignment(Qt::AlignHCenter);
+    layout->addWidget(icon);
+
+    auto *text = new QLabel(&dialog);
+    text->setTextFormat(Qt::RichText);
+    text->setAlignment(Qt::AlignHCenter);
+    text->setWordWrap(true);
+    text->setOpenExternalLinks(true); // clicking a link opens the browser
+    text->setText(QStringLiteral(
+        "<div style='text-align:center'>"
+        "<b style='font-size:15px'>PickMoji</b><br>Version %1<br><br>"
+        "A fast, native emoji picker for Windows.<br><br>"
+        "<a href='https://github.com/MrGolden1/PickMoji'>github.com/MrGolden1/PickMoji</a>"
+        "&nbsp;&nbsp;·&nbsp;&nbsp;"
+        "<a href='https://github.com/MrGolden1/PickMoji/releases'>Releases</a><br><br>"
+        "<span style='color:#8298aa;font-size:11px'>"
+        "Flag graphics: Twemoji (CC BY 4.0). Built with Qt %2.</span></div>")
+        .arg(QCoreApplication::applicationVersion(), QStringLiteral(QT_VERSION_STR)));
+    layout->addWidget(text);
+
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Close, &dialog);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    layout->addWidget(buttons);
+
     dialog.exec();
 }
 
@@ -660,4 +753,38 @@ void AppController::setStartWithWindows(bool enabled) {
 #else
     Q_UNUSED(enabled);
 #endif
+}
+
+bool AppController::autoUpdateEnabled() const {
+    QSettings settings(ORGANIZATION, APPLICATION);
+    return settings.value("autoUpdateCheck", true).toBool();
+}
+
+void AppController::setAutoUpdateEnabled(bool enabled) {
+    QSettings settings(ORGANIZATION, APPLICATION);
+    settings.setValue("autoUpdateCheck", enabled);
+    if (enabled)
+        maybeAutoCheckForUpdates();
+}
+
+void AppController::maybeAutoCheckForUpdates() {
+    if (!autoUpdateEnabled())
+        return;
+    // At most once a day, and a few seconds after launch so startup stays snappy.
+    QSettings settings(ORGANIZATION, APPLICATION);
+    const QDateTime last = settings.value("lastUpdateCheck").toDateTime();
+    const QDateTime now = QDateTime::currentDateTimeUtc();
+    if (last.isValid() && last.secsTo(now) < 20 * 60 * 60)
+        return;
+    settings.setValue("lastUpdateCheck", now);
+    QTimer::singleShot(4000, this, [this]() { m_updater.checkForUpdates(false); });
+}
+
+void AppController::onUpdateAvailable(const QString &version) {
+    if (!m_tray.isVisible())
+        return;
+    m_updatePromptPending = true;
+    m_tray.showMessage(QStringLiteral("Update available"),
+                       QStringLiteral("PickMoji %1 is available. Click to update.").arg(version),
+                       QSystemTrayIcon::Information, 8000);
 }

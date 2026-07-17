@@ -10,6 +10,9 @@ public:
     explicit SingleInstance(QObject *parent = nullptr);
     ~SingleInstance() override;
     bool startOrNotifyExisting();
+    // Give up ownership of the single-instance slot so a replacement process
+    // (a self-update relaunch) can claim it without racing this one's exit.
+    void release();
 
 signals:
     void showRequested();

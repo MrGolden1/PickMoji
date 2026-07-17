@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
-project(PickMoji LANGUAGES CXX)
+project(PickMoji VERSION 1.0.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -15,7 +15,7 @@ if(WIN32)
     add_compile_definitions(NOMINMAX)
 endif()
 
-find_package(Qt6 REQUIRED COMPONENTS Widgets)
+find_package(Qt6 REQUIRED COMPONENTS Widgets Network)
 
 add_executable(PickMoji WIN32
     main.cpp
@@ -29,6 +29,8 @@ add_executable(PickMoji WIN32
     picker_window.h
     single_instance.cpp
     single_instance.h
+    update_checker.cpp
+    update_checker.h
     usage_store.cpp
     usage_store.h
     windows_integration.cpp
@@ -37,7 +39,9 @@ add_executable(PickMoji WIN32
     resources.qrc
 )
 
-target_link_libraries(PickMoji PRIVATE Qt6::Widgets)
+target_link_libraries(PickMoji PRIVATE Qt6::Widgets Qt6::Network)
+# The self-updater compares against this and reports it as the running version.
+target_compile_definitions(PickMoji PRIVATE PICKMOJI_VERSION="${PROJECT_VERSION}")
 
 file(GLOB FLAG_ASSETS CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/assets/flags/*.png"
@@ -80,7 +84,9 @@ if(WIN32)
         OUTPUT_SCRIPT deploy_script
         NO_UNSUPPORTED_PLATFORM_ERROR
         DEPLOY_TOOL_OPTIONS
-            "--skip-plugin-types" "generic,iconengines,imageformats,networkinformation,tls"
+            # Keep the TLS plugin: the updater needs HTTPS to api.github.com
+            # (Schannel backend). PNG is built into Qt, so imageformats can go.
+            "--skip-plugin-types" "generic,iconengines,imageformats,networkinformation"
             "--no-translations"
             "--no-opengl-sw"
     )

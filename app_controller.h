@@ -1,6 +1,7 @@
 #pragma once
 
 #include "picker_window.h"
+#include "update_checker.h"
 #include "windows_integration.h"
 
 #include <QAction>
@@ -33,6 +34,7 @@ public slots:
 private:
     void setupTray();
     void showShortcutDialog();
+    void showAboutDialog();
     void updateShortcutUi();
     void chooseEmoji(const QString &emoji, bool copyOnly);
     void updateLastTarget();
@@ -53,10 +55,15 @@ private:
     void setFollowTextCursorEnabled(bool enabled);
     bool startsWithWindows() const;
     void setStartWithWindows(bool enabled);
+    bool autoUpdateEnabled() const;
+    void setAutoUpdateEnabled(bool enabled);
+    void maybeAutoCheckForUpdates();
+    void onUpdateAvailable(const QString &version);
 
     PickerWindow m_picker;
     WindowsIntegration m_windows;
     GlobalHotkey m_hotkey;
+    UpdateChecker m_updater;
     UsageStore *m_usage = nullptr;
     SingleInstance *m_singleInstance = nullptr;
     QSystemTrayIcon m_tray;
@@ -66,6 +73,9 @@ private:
     QAction *m_compatibilityAction = nullptr;
     QAction *m_followCursorAction = nullptr;
     QAction *m_startupAction = nullptr;
+    QAction *m_checkUpdateAction = nullptr;
+    QAction *m_autoUpdateAction = nullptr;
+    bool m_updatePromptPending = false;
     QActionGroup *m_sizeGroup = nullptr;
     QList<QAction *> m_sizeActions;
     QTimer m_targetMonitor;

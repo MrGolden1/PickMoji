@@ -41,3 +41,13 @@ bool SingleInstance::startOrNotifyExisting() {
 #endif
     return true;
 }
+
+void SingleInstance::release() {
+#ifdef Q_OS_WIN
+    m_pollTimer.stop();
+    if (m_eventHandle) {
+        CloseHandle(static_cast<HANDLE>(m_eventHandle));
+        m_eventHandle = nullptr;
+    }
+#endif
+}
